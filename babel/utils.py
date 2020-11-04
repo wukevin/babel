@@ -6,6 +6,7 @@ in other places would be overly difficult
 """
 import os
 import sys
+import functools
 import logging
 from typing import *
 import itertools
@@ -56,28 +57,76 @@ def get_file_extension_no_gz(fname: str) -> str:
     return retval.strip(".")
 
 
+def get_ad_reader(fname: str, ft_type: str) -> Callable:
+    """Return the function that when called, returns an AnnData object"""
+    # Modality is only used for reading h5 files
+    ext = get_file_extension_no_gz(fname)
+    if ext == "h5":
+        pfunc = functools.partial(sc.read_10x_h5, gex_only=False)
+        if not ft_type:
+            return pfunc
+
+        def helper(fname, pfunc, ft_type):
+            a = pfunc(fname)
+            return a[:, a.var["feature_types"] == ft_type]
+
+        return functools.partial(helper, pfunc=pfunc, ft_type=ft_type)
+    elif ext == "h5ad":
+        return sc.read_h5ad
+    elif ext == "csv":
+        return sc.read_csv
+    elif ext in ("tsv", "txt"):
+        return sc.read_text
+    else:
+        raise ValueError("Could not determine reader for {fname}")
+
+
 def sc_read_multi_files(
-    fnames: List[str], reader: Callable = sc.read_10x_h5
+    fnames: List[str],
+    reader: Callable = None,
+    feature_type: str = "",
+    transpose: bool = False,
+    var_name_sanitization: Callable = None,
+    join: str = "inner",
 ) -> AnnData:
     """Given a list of files, read the adata objects and concatenate"""
+    # var name sanitization lets us make sure that variable name conventions are consistent
+    assert fnames
     for fname in fnames:
         assert os.path.isfile(fname), f"File does not exist: {fname}"
-        # assert fname.endswith(".h5"), f"Unrecognized file type: {fname}"
-    parsed = [reader(fname) for fname in fnames]
+    if reader is None:  # Autodetermine reader type
+        parsed = [get_ad_reader(fname, feature_type)(fname) for fname in fnames]
+    else:  # Given a fixed reader
+        parsed = [reader(fname) for fname in fnames]
+    if transpose:
+        # h5 reading automatically transposes
+        parsed = [
+            p.T if get_file_extension_no_gz(fname) != "h5" else p
+            for p, fname in zip(parsed, fnames)
+        ]
+
+    # Log and check genomes
     for f, p in zip(fnames, parsed):
-        logging.info(f"Read in {f} for {p.shape}")
+        logging.info(f"Read in {f} for {p.shape} (obs x var)")
     genomes_present = set(
-        itertools.chain.from_iterable(
+        g
+        for g in itertools.chain.from_iterable(
             [p.var["genome"] for p in parsed if "genome" in p.var]
         )
+        if g
     )
+
+    # Build concatenated output
     assert len(genomes_present) <= 1, f"Got more than one genome: {genomes_present}"
-    for fname, p in zip(fnames, parsed):  # Make variable names unique
+    for fname, p in zip(fnames, parsed):  # Make variable names unique and ensure sparse
+        if var_name_sanitization:
+            p.var.index = pd.Index([var_name_sanitization(i) for i in p.var_names])
         p.var_names_make_unique()
+        p.X = scipy.sparse.csr_matrix(p.X)
         p.obs["source_file"] = fname
     retval = parsed[0]
     if len(parsed) > 1:
-        retval = retval.concatenate(*parsed[1:])
+        retval = retval.concatenate(*parsed[1:], join=join)
     return retval
 
 

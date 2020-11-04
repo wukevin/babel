@@ -401,9 +401,6 @@ class SingleCellDataset(Dataset):
             top_n=top_n_features,
             normalize=normalize,
             log_trans=log_trans,
-            mmap_fname=".".join([self.cache_prefix, "np_mmap", "dat"])
-            if self.cache_prefix
-            else "",  # Enables memory mapping
         )
 
         if clip > 0:
@@ -829,6 +826,56 @@ class SingleCellDataset(Dataset):
         return retval
 
 
+class SingleCellProteinDataset(Dataset):
+    """
+    Very simple dataset of CLR-transformed protein counts
+    """
+
+    # This is separate because it's so simple that tying it into SingleCellDataset
+    # would be more confusing
+
+    def __init__(
+        self,
+        raw_counts_files: Iterable[str],
+        obs_names: List[str] = None,
+        transpose: bool = True,
+    ):
+        self.raw_counts = utils.sc_read_multi_files(
+            raw_counts_files,
+            transpose=transpose,
+            var_name_sanitization=lambda x: x.strip("_TotalSeqB"),
+            feature_type="Antibody Capture",
+        )
+        assert np.all(
+            utils.ensure_arr(self.raw_counts.X) >= 0
+        ), "Got negative raw counts"
+
+        # Subset
+        if obs_names is not None:
+            logging.info(f"Subsetting protein dataset to {len(obs_names)} cells")
+            self.raw_counts = self.raw_counts[list(obs_names)]
+        else:
+            logging.info("Full protein dataset with no subsetting")
+
+        # Normalize
+        # Since this normalization is independently done PER CELL we don't have to
+        # worry about doing this after we do subsetting
+        clr_counts = clr_transform(utils.ensure_arr(self.raw_counts.X))
+        # Use data_raw to be more similar to SingleCellDataset
+        self.data_raw = AnnData(
+            clr_counts, obs=self.raw_counts.obs, var=self.raw_counts.var,
+        )
+        self.data_raw.raw = self.raw_counts
+
+    def __len__(self):
+        return self.data_raw.n_obs
+
+    def __getitem__(self, i: int):
+        clr_vec = utils.ensure_arr(self.data_raw.X[i]).flatten()
+        clr_tensor = torch.from_numpy(clr_vec).type(torch.FloatTensor)
+        return clr_tensor, clr_tensor
+
+
 class DummyDataset(Dataset):
     """
     Returns dummy of a given shape for each __getitem__ call
@@ -874,8 +921,12 @@ class SplicedDataset(Dataset):
     """
 
     def __init__(self, dataset_x, dataset_y, flat_mode: bool = False):
-        assert isinstance(dataset_x, Dataset)
-        assert isinstance(dataset_y, Dataset)
+        assert isinstance(
+            dataset_x, Dataset
+        ), f"Bad type for dataset_x: {type(dataset_x)}"
+        assert isinstance(
+            dataset_y, Dataset
+        ), f"Bad type for dataset_y: {type(dataset_y)}"
         assert len(dataset_x) == len(
             dataset_y
         ), f"Paired dataset must have the same length"
@@ -966,6 +1017,32 @@ class CattedDataset(Dataset):
         dset_idx = np.searchsorted(self.cumsum, i)
         # Index within that dataset
         return self.dsets[dset_idx][i % self.cumsum[dset_idx - 1]]
+
+
+class EncodedDataset(Dataset):
+    """
+    Sits on top of a PairedDataset that encodes each point
+    such that we return (encoded(x), y)
+    """
+
+    def __init__(self, sc_dataset: PairedDataset, model, input_mode: str = "RNA"):
+        # Mode is the source for the encoded representation
+        self.sc_dataset = sc_dataset
+        assert input_mode in ["RNA", "ATAC"], f"Unrecognized mode: {input_mode}"
+        rna_encoded, atac_encoded = model.get_encoded_layer(sc_dataset)
+        if input_mode == "RNA":
+            self.encoded = rna_encoded
+        else:
+            self.encoded = atac_encoded
+
+    def __len__(self):
+        return self.encoded.shape[0]
+
+    def __getitem__(self, idx: int):
+        """Returns the idx-th item as (encoded(x), y)"""
+        x_orig = self.sc_dataset[idx]
+        enc = self.encoded[idx]
+        return torch.from_numpy(enc).type(torch.FloatTensor), x_orig[-1]
 
 
 class SingleCellRnaDataset(Dataset):
@@ -1907,6 +1984,37 @@ def read_diff_exp_genes_to_marker_genes(
         if skip:
             continue
         retval[row["Cluster"]].append(row["Gene"])
+    return retval
+
+
+def clr_transform(x: np.ndarray, add_pseudocount: bool = True) -> np.ndarray:
+    """
+    Centered logratio transformation. Useful for protein data, but
+
+    >>> clr_transform(np.array([0.1, 0.3, 0.4, 0.2]), add_pseudocount=False)
+    array([-0.79451346,  0.30409883,  0.5917809 , -0.10136628])
+    >>> clr_transform(np.array([[0.1, 0.3, 0.4, 0.2], [0.1, 0.3, 0.4, 0.2]]), add_pseudocount=False)
+    array([[-0.79451346,  0.30409883,  0.5917809 , -0.10136628],
+           [-0.79451346,  0.30409883,  0.5917809 , -0.10136628]])
+    """
+    assert isinstance(x, np.ndarray)
+    if add_pseudocount:
+        x = x + 1.0
+    if len(x.shape) == 1:
+        denom = scipy.stats.mstats.gmean(x)
+        retval = np.log(x / denom)
+    elif len(x.shape) == 2:
+        # Assumes that each row is an independent observation
+        # and that columns denote features
+        per_row = []
+        for i in range(x.shape[0]):
+            denom = scipy.stats.mstats.gmean(x[i])
+            row = np.log(x[i] / denom)
+            per_row.append(row)
+        assert len(per_row) == x.shape[0]
+        retval = np.stack(per_row)
+    else:
+        raise ValueError(f"Cannot CLR transform array with {len(x.shape)} dims")
     return retval
 
 

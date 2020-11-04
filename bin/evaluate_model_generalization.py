@@ -27,6 +27,7 @@ assert os.path.isdir(SRC_DIR)
 sys.path.append(SRC_DIR)
 import sc_data_loaders
 import loss_functions
+import model_utils
 import plot_utils
 import adata_utils
 import utils
@@ -444,7 +445,9 @@ def build_parser():
     return parser
 
 
-def load_rna_files_for_eval(data, checkpoint: str, rna_genes_list_fname: str = ""):
+def load_rna_files_for_eval(
+    data, checkpoint: str, rna_genes_list_fname: str = "", no_filter: bool = False
+):
     """"""
     if not rna_genes_list_fname:
         rna_genes_list_fname = os.path.join(checkpoint, "rna_genes.txt")
@@ -453,6 +456,10 @@ def load_rna_files_for_eval(data, checkpoint: str, rna_genes_list_fname: str = "
     ), f"Cannot find RNA genes file: {rna_genes_list_fname}"
     rna_genes = utils.read_delimited_file(rna_genes_list_fname)
     rna_data_kwargs = copy.copy(sc_data_loaders.TENX_PBMC_RNA_DATA_KWARGS)
+    if no_filter:
+        rna_data_kwargs = {
+            k: v for k, v in rna_data_kwargs.items() if not k.startswith("filt_")
+        }
     rna_data_kwargs["fname"] = data
     if data[0].endswith(".h5ad"):
         logging.info(f"Autodetected h5ad AnnData input, adjusting reader func")
@@ -497,6 +504,7 @@ def load_atac_files_for_eval(
     """Load the ATAC files for evaluation"""
     if not atac_bins_list_fname:
         atac_bins_list_fname = os.path.join(checkpoint, "atac_bins.txt")
+        logging.info(f"Auto-set atac bins fname to {atac_bins_list_fname}")
     assert os.path.isfile(
         atac_bins_list_fname
     ), f"Cannot find ATAC bins file: {atac_bins_list_fname}"
@@ -547,59 +555,6 @@ def load_atac_files_for_eval(
             shape=len(atac_bins), length=-1
         )
     return sc_atac_full_dataset, atac_bins
-
-
-def load_model(checkpoint: str, prefix: str, input_dim1, input_dim2, device: str):
-    """Load the model, flexible to hidden dim"""
-    # Load the model
-    device_parsed = device
-    try:
-        device_parsed = utils.get_device(int(device))
-    except TypeError:
-        device_parsed = "cpu"
-
-    # Dynamically determine the model we are looking at based on name
-    checkpoint_basename = os.path.basename(checkpoint)
-    if checkpoint_basename.startswith("naive"):
-        logging.info(f"Inferred model to be naive")
-        model_class = autoencoders.NaiveSplicedAutoEncoder
-    else:
-        logging.info(f"Inferred model to be normal (non-naive)")
-        model_class = autoencoders.AssymSplicedAutoEncoder
-
-    spliced_net = None
-    for hidden_dim_size in [16, 32]:
-        try:
-            spliced_net = autoencoders.SplicedAutoEncoderSkorchNet(
-                module=model_class,
-                module__input_dim1=input_dim1,
-                module__input_dim2=input_dim2,
-                module__hidden_dim=hidden_dim_size,
-                # These don't matter because we're not training
-                lr=0.01,
-                criterion=loss_functions.QuadLoss,
-                optimizer=torch.optim.Adam,
-                batch_size=128,  # Reduced for memory saving
-                max_epochs=500,
-                iterator_train__num_workers=8,
-                iterator_valid__num_workers=8,
-                device=device_parsed,
-            )
-            spliced_net.initialize()
-            if checkpoint:
-                cp = skorch.callbacks.Checkpoint(dirname=checkpoint, fn_prefix=prefix)
-                spliced_net.load_params(checkpoint=cp)
-            else:
-                logging.warn("Using untrained model")
-            # Upon successfully finding correct hiden size, break out of loop
-            break
-        except RuntimeError:
-            logging.info(f"Failed to load with hidden size {hidden_dim_size}")
-    if spliced_net is None:
-        raise RuntimeError("Could not infer hidden size")
-
-    spliced_net.module_.eval()
-    return spliced_net
 
 
 def main():
@@ -694,7 +649,7 @@ def main():
             model_class = autoencoders.AssymSplicedAutoEncoder
 
         prefix = "" if len(args.checkpoint) == 1 else f"model_{checkpoint_basename}"
-        spliced_net = load_model(
+        spliced_net = model_utils.load_model(
             ckpt,
             prefix=args.prefix,
             input_dim1=sc_rna_full_dataset.data_raw.shape[1]

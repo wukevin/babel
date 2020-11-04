@@ -4,6 +4,7 @@ Utility functions for working with models, including some callbacks
 
 import os
 import sys
+import logging
 import argparse
 import warnings
 import inspect
@@ -19,13 +20,17 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter
-
 import skorch
 
 import tqdm
 
+MODELS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models")
+assert os.path.isdir(MODELS_DIR)
+sys.path.append(MODELS_DIR)
+import loss_functions
 import metrics
 import utils
+import autoencoders
 
 DATA_LOADER_PARAMS = {
     "batch_size": 64,
@@ -77,6 +82,78 @@ def state_dict_to_cpu(d):
     for k, v in d.items():
         retval[k] = v.cpu()
     return retval
+
+
+def load_model(
+    checkpoint: str,
+    input_dim1: int = -1,
+    input_dim2: int = -1,
+    prefix: str = "net_",
+    device: str = "cpu",
+):
+    """Load the primary model, flexible to hidden dim, for evaluation only"""
+    # Load the model
+    device_parsed = device
+    try:
+        device_parsed = utils.get_device(int(device))
+    except (TypeError, ValueError):
+        device_parsed = "cpu"
+
+    # Infer input dim sizes if they aren't given
+    if input_dim1 is None or input_dim1 <= 0:
+        rna_genes = utils.read_delimited_file(os.path.join(checkpoint, "rna_genes.txt"))
+        input_dim1 = len(rna_genes)
+    if input_dim2 is None or input_dim2 <= 0:
+        atac_bins = utils.read_delimited_file(os.path.join(checkpoint, "atac_bins.txt"))
+        chrom_counter = collections.defaultdict(int)
+        for b in atac_bins:
+            chrom = b.split(":")[0]
+            chrom_counter[chrom] += 1
+        input_dim2 = list(chrom_counter.values())
+
+    # Dynamically determine the model we are looking at based on name
+    checkpoint_basename = os.path.basename(checkpoint)
+    if checkpoint_basename.startswith("naive"):
+        logging.info(f"Inferred model to be naive")
+        model_class = autoencoders.NaiveSplicedAutoEncoder
+    else:
+        logging.info(f"Inferred model to be normal (non-naive)")
+        model_class = autoencoders.AssymSplicedAutoEncoder
+
+    spliced_net = None
+    for hidden_dim_size in [16, 32]:
+        try:
+            spliced_net = autoencoders.SplicedAutoEncoderSkorchNet(
+                module=model_class,
+                module__input_dim1=input_dim1,
+                module__input_dim2=input_dim2,
+                module__hidden_dim=hidden_dim_size,
+                # These don't matter because we're not training
+                lr=0.01,
+                criterion=loss_functions.QuadLoss,
+                optimizer=torch.optim.Adam,
+                batch_size=128,  # Reduced for memory saving
+                max_epochs=500,
+                # iterator_train__num_workers=8,
+                # iterator_valid__num_workers=8,
+                device=device_parsed,
+            )
+            spliced_net.initialize()
+            if checkpoint:
+                cp = skorch.callbacks.Checkpoint(dirname=checkpoint, fn_prefix=prefix)
+                spliced_net.load_params(checkpoint=cp)
+            else:
+                logging.warn("Using untrained model")
+            # Upon successfully finding correct hiden size, break out of loop
+            logging.info(f"Loaded model with hidden size {hidden_dim_size}")
+            break
+        except RuntimeError:
+            logging.info(f"Failed to load with hidden size {hidden_dim_size}")
+    if spliced_net is None:
+        raise RuntimeError("Could not infer hidden size")
+
+    spliced_net.module_.eval()
+    return spliced_net
 
 
 def generate_classification_perf(truths, pred_probs, multiclass=False):

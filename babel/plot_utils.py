@@ -48,6 +48,10 @@ assert os.path.isdir(SRC_DIR)
 
 SAVEFIG_DPI = 1200
 
+GENE_COLOR_CMAP = mpl.colors.LinearSegmentedColormap.from_list(
+    "seurat_like", ["gainsboro", "rebeccapurple"]
+)
+
 
 def get_pca_df(mat, num_pcs=2, group_labels=None):
     """Return a dataframe containing the PCs of the given data"""
@@ -241,9 +245,11 @@ def plot_clustering_anndata_gene_color(
     representation_axes_label: str = "",
     ax_tick: bool = False,
     seurat_mode: bool = False,
+    cmap=GENE_COLOR_CMAP,
     cbar_pos: List[float] = None,
     title: str = "",
     fname: str = "",
+    ax=None,
 ):
     """
     Plot the given adata's representation, coloring by the given gene
@@ -266,16 +272,18 @@ def plot_clustering_anndata_gene_color(
     if gene not in a.var_names:
         raise ValueError(f"Gene {gene} not found!")
     colors = a.obs_vector(gene)
-    cmap = mpl.colors.LinearSegmentedColormap.from_list(
-        "seurat_like", ["gainsboro", "rebeccapurple"]
-    )
 
-    fig, ax = plt.subplots(dpi=300, figsize=(4, 3))
+    if ax is None:
+        fig, ax = plt.subplots(dpi=300, figsize=(4, 3))
+    else:
+        fig = None
     scat = ax.scatter(
         coords[:, 0], coords[:, 1], c=colors, cmap=cmap, s=12000 / coords.shape[0]
     )
     if cbar_pos is not None:
         # Left bottom width height
+        if fig is None:
+            fig = ax.figure
         cax = fig.add_axes(cbar_pos)  # Fractional
         cax = fig.colorbar(
             scat, cax, orientation="horizontal", ticks=[np.min(colors), np.max(colors)]
@@ -291,6 +299,7 @@ def plot_clustering_anndata_gene_color(
     if not ax_tick:
         ax.set(xticks=[], yticks=[])
     if fname:
+        assert fig is not None, "Cannot provide axis and also save fig"
         fig.savefig(fname, dpi=SAVEFIG_DPI, bbox_inches="tight")
     return fig
 
@@ -309,6 +318,7 @@ def plot_scatter_with_r(
     ylim: Tuple[int, int] = None,
     one_to_one: bool = False,
     corr_func: Callable = scipy.stats.pearsonr,
+    figsize: Tuple[float, float] = (7, 5),
     fname: str = "",
     ax=None,
 ):
@@ -357,7 +367,7 @@ def plot_scatter_with_r(
     logging.info(f"Found pearson's correlation of {pearson_r:.4f}")
 
     if ax is None:
-        fig = plt.figure(dpi=300, figsize=(7, 5))
+        fig = plt.figure(dpi=300, figsize=figsize)
         if density_heatmap:
             ax = fig.add_subplot(1, 1, 1, projection="scatter_density")
             norm = ImageNormalize(vmin=0, vmax=100, stretch=LogStretch(a=100000))
@@ -371,12 +381,12 @@ def plot_scatter_with_r(
     if one_to_one:
         unit = np.linspace(*ax.get_xlim())
         ax.plot(unit, unit, linestyle="--", alpha=0.5, label="$y=x$", color="grey")
+        ax.legend()
     ax.set(
         xlabel=xlabel + (" (log)" if logscale else ""),
         ylabel=ylabel + (" (log)" if logscale else ""),
         title=(title + f" ($\\rho={pearson_r:.2f}$)").strip(),
     )
-    ax.legend()
     if xlim:
         ax.set(xlim=xlim)
     if ylim:

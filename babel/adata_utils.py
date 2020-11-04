@@ -361,7 +361,6 @@ def normalize_count_table(
     top_n: int = 0,
     normalize: bool = True,
     log_trans: bool = True,
-    mmap_fname: str = "",
 ) -> AnnData:
     """
     Normalize the count table using method described in DCA paper, performing operations IN PLACE
@@ -372,13 +371,10 @@ def normalize_count_table(
     Reference:
     https://github.com/theislab/dca/blob/master/dca/io.py
 
-    filter_min_counts - filter both genes and cells based on the integer count
-    filter_max_counts - filter *ONLY GENES* on integer count or on float
     size_factors - calculate and normalize by size factors
     top_n - retain only the top n features with largest variance after size factor normalization
     normalize - zero mean and unit variance
     log_trans - log1p scale data
-    mmap_fname - memory map backing
     """
     assert isinstance(x, AnnData)
     if log_trans or size_factors or normalize:

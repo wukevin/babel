@@ -25,6 +25,13 @@ class BCELoss(nn.BCELoss):
         )
 
 
+class L1Loss(nn.L1Loss):
+    """Custom L1 loss that ignores all but first input"""
+
+    def forward(self, x, target) -> torch.Tensor:
+        return F.l1_loss(x[0], target, reduction=self.reduction)
+
+
 class ClassWeightedBCELoss(nn.BCELoss):
     """BCE that has different weight for 1/0 class"""
 
