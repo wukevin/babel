@@ -7,6 +7,7 @@ Autoencoder etiquette:
 
 import os
 import sys
+import logging
 from typing import List, Tuple, Union, Callable
 import functools
 
@@ -343,55 +344,56 @@ class ChromDecoder(nn.Module):
                 raise ValueError(
                     f"Unrecognized type for final_activation: {type(final_activation)}"
                 )
+        logging.info(
+            f"ChromDecoder with {len(self.final_activations)} output activations"
+        )
 
-        self.final_decoders = nn.ModuleList()
-        # self.final_bn = nn.ModuleList()
+        self.final_decoders = nn.ModuleList()  # List[List[Module]]
         for n in self.num_outputs:
             layer0 = nn.Linear(16, 32)
+            nn.init.xavier_uniform_(layer0.weight)
             bn0 = nn.BatchNorm1d(32)
             act0 = activation()
+            l = [layer0, bn0, act0]
 
-            layer1 = nn.Linear(32, n)
-            layer2 = nn.Linear(32, n)
-            layer3 = nn.Linear(32, n)
-            nn.init.xavier_uniform_(layer0.weight)
-            nn.init.xavier_uniform_(layer1.weight)
-            nn.init.xavier_uniform_(layer2.weight)
-            nn.init.xavier_uniform_(layer3.weight)
-            self.final_decoders.append(
-                nn.ModuleList([layer0, bn0, act0, layer1, layer2, layer3])
-            )
+            for _i in range(len(self.final_activations)):
+                fc_layer = nn.Linear(32, n)
+                nn.init.xavier_uniform_(fc_layer.weight)
+                l.append(fc_layer)
+            self.final_decoders.append(nn.ModuleList(l))
 
     def forward(self, x):
         x = self.act1(self.bn1(self.decode1(x)))
-        x_chunked = torch.chunk(
-            x, chunks=len(self.num_outputs), dim=1
-        )  # Split, i.e. reverse of cat
+        # This is the reverse operation of cat
+        x_chunked = torch.chunk(x, chunks=len(self.num_outputs), dim=1)
 
         retval1, retval2, retval3 = [], [], []
         for chunk, processors in zip(x_chunked, self.final_decoders):
             # Each processor is a list of 3 different decoders
-            decode1, bn1, act1, decode21, decode22, decode23 = processors
+            decode1, bn1, act1, *output_decoders = processors
             chunk = act1(bn1(decode1(chunk)))
-            temp1 = decode21(chunk)
-            temp2 = decode22(chunk)
-            temp3 = decode23(chunk)
 
             if "act1" in self.final_activations.keys():
+                temp1 = output_decoders[0](chunk)
                 temp1 = self.final_activations["act1"](temp1)
+                retval1.append(temp1)
             if "act2" in self.final_activations.keys():
+                temp2 = output_decoders[1](chunk)
                 temp2 = self.final_activations["act2"](temp2)
+                retval2.append(temp2)
             if "act3" in self.final_activations.keys():
+                temp3 = output_decoders[2](chunk)
                 temp3 = self.final_activations["act3"](temp3)
+                retval3.append(temp3)
 
-            retval1.append(temp1)
-            retval2.append(temp2)
-            retval3.append(temp3)
-
-        retval1 = torch.cat(retval1, dim=1)
-        retval2 = torch.cat(retval2, dim=1)
-        retval3 = torch.cat(retval3, dim=1)
-        return retval1, retval2, retval3
+        retval = []
+        if retval1:
+            retval.append(torch.cat(retval1, dim=1))
+        if retval2:
+            retval.append(torch.cat(retval2, dim=1))
+        if retval3:
+            retval.append(torch.cat(retval3, dim=1))
+        return tuple(retval)
 
 
 class AutoEncoder(nn.Module):
@@ -476,8 +478,7 @@ class ChromAutoEncoder(nn.Module):
 
 
 class ZINBChromAutoEncoder(nn.Module):
-    """
-    """
+    """"""
 
     def __init__(
         self,
@@ -512,8 +513,7 @@ class ZINBChromAutoEncoder(nn.Module):
 
 
 class NBChromAutoEncoder(nn.Module):
-    """
-    """
+    """"""
 
     def __init__(
         self,
@@ -918,8 +918,10 @@ class SplicedAutoEncoder(nn.Module):
             if isinstance(decoded, tuple):
                 decoded = decoded[0]
             retval = decoded, encoded
-        assert isinstance(retval, tuple)
-        assert isinstance(retval[0], (torch.TensorType, torch.Tensor))
+        assert isinstance(retval, (list, tuple))
+        assert isinstance(
+            retval[0], (torch.TensorType, torch.Tensor)
+        ), f"Expected tensor but got {type(retval[0])}"
         return retval
 
     def forward_single(
