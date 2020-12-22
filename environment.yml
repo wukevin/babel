@@ -22,4 +22,5 @@ dependencies:
   - bioconda::scanpy=1.4.*
   - conda-forge::intervaltree=3.0.*
   - conda-forge::leidenalg=0.7.0
+  - anaconda::cached_property=1.5.*
 
