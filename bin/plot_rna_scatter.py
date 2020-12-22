@@ -86,6 +86,17 @@ def build_parser():
         action="store_true",
         help="Plot in linear space instead of log space",
     )
+    parser.add_argument(
+        "--density",
+        action="store_true",
+        help="Plot density scatterplot instead of individual points",
+    )
+    parser.add_argument(
+        "--densitylogstretch",
+        type=int,
+        default=1000,
+        help="Density logstretch for image normalization",
+    )
     parser.add_argument("--title", "-t", type=str, default="")
     parser.add_argument("--xlabel", type=str, default="Original norm counts")
     parser.add_argument("--ylabel", type=str, default="Inferred norm counts")
@@ -169,22 +180,19 @@ def main():
 
     assert x_rna.shape == y_rna.shape, f"Mismatched shapes {x_rna.shape} {y_rna.shape}"
 
-    if args.figsize is not None:
-        fig, ax = plt.subplots(figsize=tuple(args.figsize), dpi=1200)
-    else:
-        fig, ax = plt.subplots(dpi=1200)
-
-    plot_utils.plot_scatter_with_r(
+    fig = plot_utils.plot_scatter_with_r(
         x_rna.X,
         y_rna.X,
         subset=args.subset,
         one_to_one=True,
         logscale=not args.linear,
+        density_heatmap=args.density,
+        density_logstretch=args.densitylogstretch,
         fname=args.outfname,
         title=args.title,
         xlabel=args.xlabel,
         ylabel=args.ylabel,
-        ax=ax,
+        figsize=args.figsize,
     )
     fig.savefig(args.outfname, bbox_inches="tight")
 

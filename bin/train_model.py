@@ -16,6 +16,7 @@ import scipy.spatial
 import scanpy as sc
 
 import matplotlib.pyplot as plt
+from skorch.helper import predefined_split
 
 import torch
 import torch.nn as nn
@@ -66,12 +67,23 @@ def build_parser():
     )
     input_group = parser.add_mutually_exclusive_group(required=True)
     input_group.add_argument(
-        "--data", "-d", type=str, nargs="*", help="Data files to train on",
+        "--data",
+        "-d",
+        type=str,
+        nargs="*",
+        help="Data files to train on",
     )
     input_group.add_argument(
         "--snareseq",
         action="store_true",
         help="Data in SNAREseq format, use custom data loading logic for separated RNA ATC files",
+    )
+    input_group.add_argument(
+        "--shareseq",
+        nargs="+",
+        type=str,
+        choices=["lung", "skin", "brain"],
+        help="Load in the given SHAREseq datasets",
     )
     parser.add_argument(
         "--linear",
@@ -150,14 +162,19 @@ def plot_loss_history(history, fname: str):
     """Create a plot of train valid loss"""
     fig, ax = plt.subplots(dpi=300)
     ax.plot(
-        np.arange(len(history)), history[:, "train_loss"], label="Train",
+        np.arange(len(history)),
+        history[:, "train_loss"],
+        label="Train",
     )
     ax.plot(
-        np.arange(len(history)), history[:, "valid_loss"], label="Valid",
+        np.arange(len(history)),
+        history[:, "valid_loss"],
+        label="Valid",
     )
     ax.legend()
     ax.set(
-        xlabel="Epoch", ylabel="Loss",
+        xlabel="Epoch",
+        ylabel="Loss",
     )
     fig.savefig(fname)
     return fig
@@ -186,37 +203,59 @@ def main():
 
     # Borrow parameters
     logging.info("Reading RNA data")
-    if not args.snareseq:
+    if args.snareseq:
+        rna_data_kwargs = copy.copy(sc_data_loaders.SNARESEQ_RNA_DATA_KWARGS)
+    elif args.shareseq:
+        logging.info(f"Loading in SHAREseq RNA data for: {args.shareseq}")
+        rna_data_kwargs = copy.copy(sc_data_loaders.SNARESEQ_RNA_DATA_KWARGS)
+        rna_data_kwargs["fname"] = None
+        rna_data_kwargs["reader"] = None
+        rna_data_kwargs["cell_info"] = None
+        rna_data_kwargs["gene_info"] = None
+        rna_data_kwargs["transpose"] = False
+        # Load in the datasets
+        shareseq_rna_adatas = []
+        for tissuetype in args.shareseq:
+            shareseq_rna_adatas.append(
+                adata_utils.load_shareseq_data(
+                    tissuetype,
+                    dirname="/data/wukevin/commonspace_data/GSE140203_SHAREseq",
+                    mode="RNA",
+                )
+            )
+        shareseq_rna_adata = shareseq_rna_adatas[0]
+        if len(shareseq_rna_adatas) > 1:
+            shareseq_rna_adata = shareseq_rna_adata.concatenate(
+                *shareseq_rna_adatas[1:],
+                join="inner",
+                batch_key="tissue",
+                batch_categories=args.shareseq,
+            )
+        rna_data_kwargs["raw_adata"] = shareseq_rna_adata
+    else:
         rna_data_kwargs = copy.copy(sc_data_loaders.TENX_PBMC_RNA_DATA_KWARGS)
         rna_data_kwargs["fname"] = args.data
-    else:
-        rna_data_kwargs = copy.copy(sc_data_loaders.SNARESEQ_RNA_DATA_KWARGS)
     rna_data_kwargs["data_split_by_cluster_log"] = not args.linear
     rna_data_kwargs["data_split_by_cluster"] = args.clustermethod
 
-    sc_rna_train_dataset = sc_data_loaders.SingleCellDataset(
-        mode="train",
+    sc_rna_dataset = sc_data_loaders.SingleCellDataset(
         valid_cluster_id=args.validcluster,
         test_cluster_id=args.testcluster,
         **rna_data_kwargs,
     )
-    sc_rna_valid_dataset = sc_data_loaders.SingleCellDataset(
-        mode="valid",
-        valid_cluster_id=args.validcluster,
-        test_cluster_id=args.testcluster,
-        **rna_data_kwargs,
+
+    sc_rna_train_dataset = sc_data_loaders.SingleCellDatasetSplit(
+        sc_rna_dataset,
+        split="train",
     )
-    sc_rna_test_dataset = sc_data_loaders.SingleCellDataset(
-        mode="test",
-        valid_cluster_id=args.validcluster,
-        test_cluster_id=args.testcluster,
-        **rna_data_kwargs,
+    sc_rna_valid_dataset = sc_data_loaders.SingleCellDatasetSplit(
+        sc_rna_dataset,
+        split="valid",
     )
-    assert (
-        sc_rna_test_dataset.data_raw.shape[1]
-        == sc_rna_valid_dataset.data_raw.shape[1]
-        == sc_rna_train_dataset.data_raw.shape[1]
-    ), "Mismatched shapes for RNA data loaders"
+    sc_rna_test_dataset = sc_data_loaders.SingleCellDatasetSplit(
+        sc_rna_dataset,
+        split="test",
+    )
 
     # logging.info(f"Identifying marker genes")
     # adata_utils.find_marker_genes(sc_rna_full_dataset.data_raw, n_genes=25)
@@ -226,18 +265,56 @@ def main():
 
     # ATAC
     logging.info("Aggregating ATAC clusters")
-    if not args.snareseq:
+    if args.snareseq:
+        atac_data_kwargs = copy.copy(sc_data_loaders.SNARESEQ_ATAC_DATA_KWARGS)
+    elif args.shareseq:
+        logging.info(f"Loading in SHAREseq ATAC data for {args.shareseq}")
+        atac_data_kwargs = copy.copy(sc_data_loaders.SNARESEQ_ATAC_DATA_KWARGS)
+        atac_data_kwargs["reader"] = None
+        atac_data_kwargs["fname"] = None
+        atac_data_kwargs["cell_info"] = None
+        atac_data_kwargs["gene_info"] = None
+        atac_data_kwargs["transpose"] = False
+        atac_adatas = []
+        for tissuetype in args.shareseq:
+            atac_adatas.append(
+                adata_utils.load_shareseq_data(
+                    tissuetype,
+                    dirname="/data/wukevin/commonspace_data/GSE140203_SHAREseq",
+                    mode="ATAC",
+                )
+            )
+        atac_bins = [a.var_names for a in atac_adatas]
+        if len(atac_adatas) > 1:
+            atac_bins_harmonized = sc_data_loaders.harmonize_atac_intervals(*atac_bins)
+            atac_adatas = [
+                sc_data_loaders.repool_atac_bins(a, atac_bins_harmonized)
+                for a in atac_adatas
+            ]
+        shareseq_atac_adata = atac_adatas[0]
+        if len(atac_adatas) > 1:
+            shareseq_atac_adata = shareseq_atac_adata.concatenate(
+                *atac_adatas[1:],
+                join="inner",
+                batch_key="tissue",
+                batch_categories=args.shareseq,
+            )
+        atac_data_kwargs["raw_adata"] = shareseq_atac_adata
+    else:
         atac_parsed = [
             utils.sc_read_10x_h5_ft_type(fname, "Peaks") for fname in args.data
         ]
-        atac_bins = sc_data_loaders.harmonize_atac_intervals(
-            atac_parsed[0].var_names, atac_parsed[1].var_names
-        )
-        for bins in atac_parsed[2:]:
+        if len(atac_parsed) > 1:
             atac_bins = sc_data_loaders.harmonize_atac_intervals(
-                atac_bins, bins.var_names
+                atac_parsed[0].var_names, atac_parsed[1].var_names
             )
-        logging.info(f"Aggregated {len(atac_bins)} bins")
+            for bins in atac_parsed[2:]:
+                atac_bins = sc_data_loaders.harmonize_atac_intervals(
+                    atac_bins, bins.var_names
+                )
+            logging.info(f"Aggregated {len(atac_bins)} bins")
+        else:
+            atac_bins = list(atac_parsed[0].var_names)
 
         atac_data_kwargs = copy.copy(sc_data_loaders.TENX_PBMC_ATAC_DATA_KWARGS)
         atac_data_kwargs["fname"] = rna_data_kwargs["fname"]
@@ -245,36 +322,47 @@ def main():
         atac_data_kwargs["reader"] = functools.partial(
             utils.sc_read_multi_files,
             reader=lambda x: sc_data_loaders.repool_atac_bins(
-                utils.sc_read_10x_h5_ft_type(x, "Peaks"), atac_bins,
+                utils.sc_read_10x_h5_ft_type(x, "Peaks"),
+                atac_bins,
             ),
         )
-    else:
-        atac_data_kwargs = copy.copy(sc_data_loaders.SNARESEQ_ATAC_DATA_KWARGS)
     atac_data_kwargs["cluster_res"] = 0  # Do not bother clustering ATAC data
 
-    sc_atac_train_dataset = sc_data_loaders.SingleCellDataset(
-        predefined_split=sc_rna_train_dataset.data_raw.obs_names, **atac_data_kwargs,
+    sc_atac_dataset = sc_data_loaders.SingleCellDataset(
+        predefined_split=sc_rna_dataset, **atac_data_kwargs
     )
-    sc_atac_valid_dataset = sc_data_loaders.SingleCellDataset(
-        predefined_split=sc_rna_valid_dataset.data_raw.obs_names, **atac_data_kwargs,
+    sc_atac_train_dataset = sc_data_loaders.SingleCellDatasetSplit(
+        sc_atac_dataset,
+        split="train",
     )
-    sc_atac_test_dataset = sc_data_loaders.SingleCellDataset(
-        predefined_split=sc_rna_test_dataset.data_raw.obs_names, **atac_data_kwargs,
+    sc_atac_valid_dataset = sc_data_loaders.SingleCellDatasetSplit(
+        sc_atac_dataset,
+        split="valid",
     )
-    assert (
-        sc_atac_train_dataset.data_raw.shape[1]
-        == sc_atac_valid_dataset.data_raw.shape[1]
-        == sc_atac_test_dataset.data_raw.shape[1]
+    sc_atac_test_dataset = sc_data_loaders.SingleCellDatasetSplit(
+        sc_atac_dataset,
+        split="test",
     )
 
     sc_dual_train_dataset = sc_data_loaders.PairedDataset(
-        sc_rna_train_dataset, sc_atac_train_dataset, flat_mode=True,
+        sc_rna_train_dataset,
+        sc_atac_train_dataset,
+        flat_mode=True,
     )
     sc_dual_valid_dataset = sc_data_loaders.PairedDataset(
-        sc_rna_valid_dataset, sc_atac_valid_dataset, flat_mode=True,
+        sc_rna_valid_dataset,
+        sc_atac_valid_dataset,
+        flat_mode=True,
     )
     sc_dual_test_dataset = sc_data_loaders.PairedDataset(
-        sc_rna_test_dataset, sc_atac_test_dataset, flat_mode=True,
+        sc_rna_test_dataset,
+        sc_atac_test_dataset,
+        flat_mode=True,
+    )
+    sc_dual_full_dataset = sc_data_loaders.PairedDataset(
+        sc_rna_dataset,
+        sc_atac_dataset,
+        flat_mode=True,
     )
 
     # Model
@@ -294,33 +382,45 @@ def main():
             os.makedirs(outdir_name)
         assert os.path.isdir(outdir_name)
         with open(os.path.join(outdir_name, "rna_genes.txt"), "w") as sink:
-            for gene in sc_rna_train_dataset.data_raw.var_names:
+            for gene in sc_rna_dataset.data_raw.var_names:
                 sink.write(gene + "\n")
         with open(os.path.join(outdir_name, "atac_bins.txt"), "w") as sink:
-            for atac_bin in sc_atac_train_dataset.data_raw.var_names:
+            for atac_bin in sc_atac_dataset.data_raw.var_names:
                 sink.write(atac_bin + "\n")
 
-        # Write train and validation data
+        # Write dataset
+        ### Full
+        sc_rna_dataset.size_norm_counts.write_h5ad(
+            os.path.join(outdir_name, "full_rna.h5ad")
+        )
+        sc_rna_dataset.size_norm_log_counts.write_h5ad(
+            os.path.join(outdir_name, "full_rna_log.h5ad")
+        )
+        sc_atac_dataset.data_raw.write_h5ad(os.path.join(outdir_name, "full_atac.h5ad"))
+        ### Train
         sc_rna_train_dataset.size_norm_counts.write_h5ad(
             os.path.join(outdir_name, "train_rna.h5ad")
-        )
-        sc_rna_valid_dataset.size_norm_counts.write_h5ad(
-            os.path.join(outdir_name, "valid_rna.h5ad")
         )
         sc_atac_train_dataset.data_raw.write_h5ad(
             os.path.join(outdir_name, "train_atac.h5ad")
         )
+        ### Valid
+        sc_rna_valid_dataset.size_norm_counts.write_h5ad(
+            os.path.join(outdir_name, "valid_rna.h5ad")
+        )
         sc_atac_valid_dataset.data_raw.write_h5ad(
             os.path.join(outdir_name, "valid_atac.h5ad")
         )
-        # Write test set ground truth
+        ### Test
         sc_rna_test_dataset.size_norm_counts.write_h5ad(
             os.path.join(outdir_name, "truth_rna.h5ad")
         )
+        sc_atac_dataset.data_raw.write_h5ad(os.path.join(outdir_name, "full_atac.h5ad"))
         sc_atac_test_dataset.data_raw.write_h5ad(
             os.path.join(outdir_name, "truth_atac.h5ad")
         )
 
+        # Instantiate and train model
         model_class = (
             autoencoders.NaiveSplicedAutoEncoder
             if args.naive
@@ -329,8 +429,8 @@ def main():
         spliced_net = autoencoders.SplicedAutoEncoderSkorchNet(
             module=model_class,
             module__hidden_dim=h_dim,  # Based on hyperparam tuning
-            module__input_dim1=sc_rna_train_dataset.data_raw.shape[1],
-            module__input_dim2=sc_atac_train_dataset.get_per_chrom_feature_count(),
+            module__input_dim1=sc_rna_dataset.data_raw.shape[1],
+            module__input_dim2=sc_atac_dataset.get_per_chrom_feature_count(),
             module__final_activations1=[
                 activations.Exp(),
                 activations.ClippedSoftplus(),
@@ -356,7 +456,9 @@ def main():
                 ),
                 skorch.callbacks.GradientNormClipping(gradient_clip_value=5),
                 skorch.callbacks.Checkpoint(
-                    dirname=outdir_name, fn_prefix="net_", monitor="valid_loss_best",
+                    dirname=outdir_name,
+                    fn_prefix="net_",
+                    monitor="valid_loss_best",
                 ),
             ],
             train_split=skorch.helper.predefined_split(sc_dual_valid_dataset),
@@ -375,8 +477,8 @@ def main():
         )
         plt.close(fig)
 
-        # Evaluate on test set
-        ### RNA > RNA
+        logging.info("Evaluating on test set")
+        logging.info("Evaluating RNA > RNA")
         sc_rna_test_preds = spliced_net.translate_1_to_1(sc_dual_test_dataset)
         sc_rna_test_preds_anndata = sc.AnnData(
             sc_rna_test_preds,
@@ -389,18 +491,9 @@ def main():
         fig = plot_utils.plot_scatter_with_r(
             sc_rna_test_dataset.size_norm_counts.X,
             sc_rna_test_preds,
-            subset=100000,
-            one_to_one=True,
-            title="RNA > RNA (test set)",
-            fname=os.path.join(outdir_name, f"rna_rna_scatter.{args.ext}"),
-        )
-        plt.close(fig)
-        fig = plot_utils.plot_scatter_with_r(
-            sc_rna_test_dataset.size_norm_counts.X,
-            sc_rna_test_preds,
-            subset=100000,
             one_to_one=True,
             logscale=True,
+            density_heatmap=True,
             title="RNA > RNA (test set)",
             fname=os.path.join(outdir_name, f"rna_rna_scatter_log.{args.ext}"),
         )
@@ -415,7 +508,7 @@ def main():
         # )
         # plt.close(fig)
 
-        ### ATAC > ATAC
+        logging.info("Evaluating ATAC > ATAC")
         sc_atac_test_preds = spliced_net.translate_2_to_2(sc_dual_test_dataset)
         sc_atac_test_preds_anndata = sc.AnnData(
             sc_atac_test_preds,
@@ -440,7 +533,7 @@ def main():
         # )
         # plt.close(fig)
 
-        ### ATAC > RNA
+        logging.info("Evaluating ATAC > RNA")
         sc_atac_rna_test_preds = spliced_net.translate_2_to_1(sc_dual_test_dataset)
         sc_atac_rna_test_preds_anndata = sc.AnnData(
             sc_atac_rna_test_preds,
@@ -450,37 +543,18 @@ def main():
         sc_atac_rna_test_preds_anndata.write_h5ad(
             os.path.join(outdir_name, "atac_rna_test_preds.h5ad")
         )
-
         fig = plot_utils.plot_scatter_with_r(
             sc_rna_test_dataset.size_norm_counts.X,
             sc_atac_rna_test_preds,
-            subset=100000,
-            one_to_one=True,
-            title="ATAC > RNA (test set)",
-            fname=os.path.join(outdir_name, f"atac_rna_scatter.{args.ext}"),
-        )
-        plt.close(fig)
-
-        fig = plot_utils.plot_scatter_with_r(
-            sc_rna_test_dataset.size_norm_counts.X,
-            sc_atac_rna_test_preds,
-            subset=100000,
             one_to_one=True,
             logscale=True,
+            density_heatmap=True,
             title="ATAC > RNA (test set)",
             fname=os.path.join(outdir_name, f"atac_rna_scatter_log.{args.ext}"),
         )
         plt.close(fig)
-        # fig = plot_utils.plot_scatter_with_r(
-        #     sc_rna_test_dataset.size_norm_counts[:, marker_genes].X.flatten(),
-        #     sc_atac_rna_test_preds_anndata[:, marker_genes].X.flatten(),
-        #     one_to_one=True,
-        #     title="ATAC > RNA, marker genes",
-        #     fname=os.path.join(outdir_name, f"atac_rna_scatter_marker.{args.ext}"),
-        # )
-        # plt.close(fig)
 
-        ### RNA > ATAC
+        logging.info("Evaluating RNA > ATAC")
         sc_rna_atac_test_preds = spliced_net.translate_1_to_2(sc_dual_test_dataset)
         sc_rna_atac_test_preds_anndata = sc.AnnData(
             sc_rna_atac_test_preds,
@@ -506,79 +580,78 @@ def main():
         # plt.close(fig)
 
         # Evaluate latent space
-        rna_encoded, atac_encoded = spliced_net.get_encoded_layer(sc_dual_test_dataset)
-        # Plot each latent dimension
-        fig, axes = plt.subplots(
-            dpi=300, ncols=4, nrows=4, sharex=True, sharey=True, figsize=(7, 4)
-        )
-        for i, ax_row in enumerate(axes):
-            for j, ax in enumerate(ax_row):
-                idx = i * 4 + j
-                _n, bins, _patches = ax.hist(
-                    rna_encoded[:, idx], alpha=0.7, label="RNA"
-                )
-                ax.hist(atac_encoded[:, idx], alpha=0.7, bins=bins, label="ATAC")
-                v = np.var(
-                    np.hstack(
-                        (rna_encoded[:, idx].flatten(), atac_encoded[:, idx].flatten())
-                    )
-                )
-                ax.text(
-                    0.9,
-                    0.9,
-                    f"var: {v:.3f}",
-                    horizontalalignment="right",
-                    verticalalignment="top",
-                    transform=ax.transAxes,
-                )
-        fig.suptitle(f"{idx + 1} dimensional latent space")
-        fig.savefig(os.path.join(outdir_name, f"latent_dimensions.{args.ext}"))
-        plt.close(fig)
+        # rna_encoded, atac_encoded = spliced_net.get_encoded_layer(sc_dual_test_dataset)
+        # fig, axes = plt.subplots(
+        #     dpi=300, ncols=4, nrows=4, sharex=True, sharey=True, figsize=(7, 4)
+        # )
+        # for i, ax_row in enumerate(axes):
+        #     for j, ax in enumerate(ax_row):
+        #         idx = i * 4 + j
+        #         _n, bins, _patches = ax.hist(
+        #             rna_encoded[:, idx], alpha=0.7, label="RNA"
+        #         )
+        #         ax.hist(atac_encoded[:, idx], alpha=0.7, bins=bins, label="ATAC")
+        #         v = np.var(
+        #             np.hstack(
+        #                 (rna_encoded[:, idx].flatten(), atac_encoded[:, idx].flatten())
+        #             )
+        #         )
+        #         ax.text(
+        #             0.9,
+        #             0.9,
+        #             f"var: {v:.3f}",
+        #             horizontalalignment="right",
+        #             verticalalignment="top",
+        #             transform=ax.transAxes,
+        #         )
+        # fig.suptitle(f"{idx + 1} dimensional latent space")
+        # fig.savefig(os.path.join(outdir_name, f"latent_dimensions.{args.ext}"))
+        # plt.close(fig)
 
-        matched_distance = np.array(
-            [
-                scipy.spatial.distance.euclidean(i, j)
-                for i, j in zip(rna_encoded, atac_encoded)
-            ]
-        )
-        shuffled_distance = np.array(
-            [
-                scipy.spatial.distance.euclidean(rna_encoded[i, :], atac_encoded[j, :])
-                for i, j in zip(
-                    np.random.permutation(rna_encoded.shape[0]),
-                    np.random.permutation(atac_encoded.shape[0]),
-                )
-            ]
-        )
-        assert matched_distance.shape == shuffled_distance.shape
+        # matched_distance = np.array(
+        #     [
+        #         scipy.spatial.distance.euclidean(i, j)
+        #         for i, j in zip(rna_encoded, atac_encoded)
+        #     ]
+        # )
+        # shuffled_distance = np.array(
+        #     [
+        #         scipy.spatial.distance.euclidean(rna_encoded[i, :], atac_encoded[j, :])
+        #         for i, j in zip(
+        #             np.random.permutation(rna_encoded.shape[0]),
+        #             np.random.permutation(atac_encoded.shape[0]),
+        #         )
+        #     ]
+        # )
+        # assert matched_distance.shape == shuffled_distance.shape
 
-        fig, ax = plt.subplots(dpi=300)
-        ax.hist(shuffled_distance, label="Mismatched pairs", alpha=0.7)
-        ax.hist(matched_distance, label="Matched pairs", alpha=0.7)
-        ax.legend()
-        ax.set(
-            xlabel="Euclidean distance in latent space",
-            title=f"Test set latent space representations (p={scipy.stats.ttest_ind(matched_distance, shuffled_distance)[1]:.4g})",
-        )
-        fig.savefig(os.path.join(outdir_name, f"latent_distance.{args.ext}"))
-        plt.close(fig)
+        # fig, ax = plt.subplots(dpi=300)
+        # ax.hist(shuffled_distance, label="Mismatched pairs", alpha=0.7)
+        # ax.hist(matched_distance, label="Matched pairs", alpha=0.7)
+        # ax.legend()
+        # ax.set(
+        #     xlabel="Euclidean distance in latent space",
+        #     title=f"Test set latent space representations (p={scipy.stats.ttest_ind(matched_distance, shuffled_distance)[1]:.4g})",
+        # )
+        # fig.savefig(os.path.join(outdir_name, f"latent_distance.{args.ext}"))
+        # plt.close(fig)
 
-        all_encoded = sc.AnnData(
-            np.vstack([rna_encoded, atac_encoded]),
-            obs=pd.DataFrame(
-                index=[l + "-rna" for l in sc_dual_test_dataset.get_obs_labels()]
-                + [l + "-atac" for l in sc_dual_test_dataset.get_obs_labels()]
-            ),
-        )
-        all_encoded.obs["data_platform"] = [
-            l.split("-")[-1] for l in all_encoded.obs_names
-        ]
+        # all_encoded = sc.AnnData(
+        #     np.vstack([rna_encoded, atac_encoded]),
+        #     obs=pd.DataFrame(
+        #         index=[l + "-rna" for l in sc_dual_test_dataset.get_obs_labels()]
+        #         + [l + "-atac" for l in sc_dual_test_dataset.get_obs_labels()]
+        #     ),
+        # )
+        # all_encoded.obs["data_platform"] = [
+        #     l.split("-")[-1] for l in all_encoded.obs_names
+        # ]
 
-        plot_utils.preprocess_anndata(all_encoded)
-        fig = plot_utils.plot_clustering_anndata(
-            all_encoded, color="data_platform"
-        ).savefig(os.path.join(outdir_name, f"latent_clustering.{args.ext}"))
-        plt.close(fig)
+        # plot_utils.preprocess_anndata(all_encoded)
+        # fig = plot_utils.plot_clustering_anndata(
+        #     all_encoded, color="data_platform"
+        # ).savefig(os.path.join(outdir_name, f"latent_clustering.{args.ext}"))
+        # plt.close(fig)
         del spliced_net
 
 

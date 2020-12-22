@@ -21,7 +21,8 @@ import torch
 import skorch
 
 SRC_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "babel",
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "babel",
 )
 assert os.path.isdir(SRC_DIR)
 sys.path.append(SRC_DIR)
@@ -62,20 +63,10 @@ def do_evaluation_rna_from_rna(
     logging.info("Inferring RNA from RNA...")
     sc_rna_full_preds = spliced_net.translate_1_to_1(sc_dual_full_dataset)
     sc_rna_full_preds_anndata = sc.AnnData(
-        sc_rna_full_preds, obs=sc_dual_full_dataset.dataset_x.data_raw.obs,
+        sc_rna_full_preds,
+        obs=sc_dual_full_dataset.dataset_x.data_raw.obs,
     )
     sc_rna_full_preds_anndata.var_names = gene_names
-
-    # Infer marker genes
-    # logging.info("Getting marker genes for RNA from RNA")
-    # plot_utils.preprocess_anndata(sc_rna_full_preds_anndata)
-    # adata_utils.find_marker_genes(sc_rna_full_preds_anndata)
-    # inferred_marker_genes = adata_utils.flatten_marker_genes(
-    #     sc_rna_full_preds_anndata.uns["rank_genes_leiden"]
-    # )
-    # logging.info(f"Found {len(inferred_marker_genes)} marker genes for RNA from RNA")
-    # with open(os.path.join(outdir, "rna_rna_marker_genes.txt"), "w") as sink:
-    #     sink.write("\n".join(inferred_marker_genes) + "\n")
 
     logging.info("Writing RNA from RNA")
     sc_rna_full_preds_anndata.write(
@@ -86,42 +77,12 @@ def do_evaluation_rna_from_rna(
         plot_utils.plot_scatter_with_r(
             sc_dual_full_dataset.dataset_x.size_norm_counts.X,
             sc_rna_full_preds,
-            subset=100000,
-            one_to_one=True,
-            title=f"{DATASET_NAME} RNA > RNA".strip(),
-            fname=os.path.join(outdir, f"{prefix}_rna_rna_linear.{ext}".strip("_")),
-        )
-        plot_utils.plot_scatter_with_r(
-            sc_dual_full_dataset.dataset_x.size_norm_counts.X,
-            sc_rna_full_preds,
-            subset=100000,
             one_to_one=True,
             logscale=True,
+            density_heatmap=True,
             title=f"{DATASET_NAME} RNA > RNA".strip(),
             fname=os.path.join(outdir, f"{prefix}_rna_rna_log.{ext}".strip("_")),
         )
-        # plot_utils.plot_scatter_with_r(
-        #     sc_dual_full_dataset.dataset_x.size_norm_counts[
-        #         :, marker_genes
-        #     ].X.flatten(),
-        #     sc_rna_full_preds_anndata[:, marker_genes].X.flatten(),
-        #     subset=100000,
-        #     one_to_one=True,
-        #     title=f"{DATASET_NAME} RNA > RNA, marker genes".strip(),
-        #     fname=os.path.join(outdir, f"{prefix}_rna_rna_marker.{ext}".strip("_")),
-        # )
-        # # Focus only on marker genes
-        # plot_utils.plot_scatter_with_r(
-        #     sc_dual_full_dataset.dataset_x.size_norm_counts[
-        #         :, housekeeper_genes
-        #     ].X.flatten(),
-        #     sc_rna_full_preds_anndata[:, housekeeper_genes].X.flatten(),
-        #     one_to_one=True,
-        #     title=f"{DATASET_NAME} RNA > RNA, housekeeper genes".strip(),
-        #     fname=os.path.join(
-        #         outdir, f"{prefix}_rna_rna_housekeeper.{ext}".strip("_")
-        #     ),
-        # )
 
 
 def do_evaluation_atac_from_rna(
@@ -148,19 +109,6 @@ def do_evaluation_atac_from_rna(
         os.path.join(outdir, f"{prefix}_rna_atac_adata.h5ad".strip("_"))
     )
 
-    # Get marker bins
-    # logging.info("Getting marker bins for ATAC from RNA")
-    # plot_utils.preprocess_anndata(sc_rna_atac_full_preds_anndata)
-    # adata_utils.find_marker_genes(sc_rna_atac_full_preds_anndata)
-    # inferred_marker_bins = adata_utils.flatten_marker_genes(
-    #     sc_rna_atac_full_preds_anndata.uns["rank_genes_leiden"]
-    # )
-    # logging.info(f"Found {len(inferred_marker_bins)} marker bins for ATAC from RNA")
-    # with open(
-    #     os.path.join(outdir, f"{prefix}_rna_atac_marker_bins.txt".strip("_")), "w"
-    # ) as sink:
-    #     sink.write("\n".join(inferred_marker_bins) + "\n")
-
     if hasattr(sc_dual_full_dataset.dataset_y, "data_raw") and ext is not None:
         logging.info("Plotting ATAC from RNA")
         plot_utils.plot_auroc(
@@ -174,13 +122,6 @@ def do_evaluation_atac_from_rna(
         #     utils.ensure_arr(sc_rna_atac_full_preds),
         #     title_prefix=f"{DATASET_NAME} RNA > ATAC".strip(),
         #     fname=os.path.join(outdir, f"{prefix}_rna_atac_auprc.{ext}".strip("_")),
-        # )
-        # plot_utils.plot_binary(
-        #     sc_dual_full_dataset.dataset_y.data_raw.X.toarray().flatten(),
-        #     sc_rna_atac_full_preds.flatten(),
-        #     subset=100000,
-        #     title=f"{DATASET_NAME} RNA > ATAC".strip(),
-        #     fname=os.path.join(outdir, f"{prefix}_rna_atac_violin.{ext}".strip("_")),
         # )
 
 
@@ -264,17 +205,6 @@ def do_evaluation_rna_from_atac(
     sc_atac_rna_full_preds_anndata.var_names = gene_names
     logging.info("Writing RNA from ATAC")
 
-    # Infer marker genes
-    #     logging.info("Getting marker genes for RNA from ATAC")
-    #     plot_utils.preprocess_anndata(sc_atac_rna_full_preds_anndata)
-    #     adata_utils.find_marker_genes(sc_atac_rna_full_preds_anndata)
-    #     inferred_marker_genes = adata_utils.flatten_marker_genes(
-    #         sc_atac_rna_full_preds_anndata.uns["rank_genes_groups"]
-    #     )
-    #     logging.info(f"Found {len(inferred_marker_genes)} marker genes for RNA from ATAC")
-    #     with open(os.path.join(outdir, "atac_rna_marker_genes.txt"), "w") as sink:
-    #         sink.write("\n".join(inferred_marker_genes) + "\n")
-    #
     # Seurat also expects the raw attribute to be populated
     sc_atac_rna_full_preds_anndata.raw = sc_atac_rna_full_preds_anndata.copy()
     sc_atac_rna_full_preds_anndata.write(
@@ -294,46 +224,12 @@ def do_evaluation_rna_from_atac(
         plot_utils.plot_scatter_with_r(
             sc_dual_full_dataset.dataset_x.size_norm_counts.X,
             sc_atac_rna_full_preds,
-            subset=100000,
-            one_to_one=True,
-            title=f"{DATASET_NAME} ATAC > RNA".strip(),
-            fname=os.path.join(outdir, f"{prefix}_atac_rna_linear.{ext}".strip("_")),
-        )
-        plot_utils.plot_scatter_with_r(
-            sc_dual_full_dataset.dataset_x.size_norm_counts.X,
-            sc_atac_rna_full_preds,
-            subset=100000,
             one_to_one=True,
             logscale=True,
+            density_heatmap=True,
             title=f"{DATASET_NAME} ATAC > RNA".strip(),
             fname=os.path.join(outdir, f"{prefix}_atac_rna_log.{ext}".strip("_")),
         )
-        # Focus only on marker genes
-        # plot_utils.plot_scatter_with_r(
-        #     sc_dual_full_dataset.dataset_x.size_norm_counts[
-        #         :, marker_genes
-        #     ].X.flatten(),
-        #     utils.ensure_arr(
-        #         sc_atac_rna_full_preds_anndata[:, marker_genes].X
-        #     ).flatten(),
-        #     one_to_one=True,
-        #     title=f"{DATASET_NAME} ATAC > RNA, marker genes".strip(),
-        #     fname=os.path.join(outdir, f"{prefix}_atac_rna_marker.{ext}".strip("_")),
-        # )
-        # # Focus only on marker genes
-        # plot_utils.plot_scatter_with_r(
-        #     sc_dual_full_dataset.dataset_x.size_norm_counts[
-        #         :, housekeeper_genes
-        #     ].X.flatten(),
-        #     utils.ensure_arr(
-        #         sc_atac_rna_full_preds_anndata[:, housekeeper_genes].X
-        #     ).flatten(),
-        #     one_to_one=True,
-        #     title=f"{DATASET_NAME} ATAC > RNA, housekeeper genes".strip(),
-        #     fname=os.path.join(
-        #         outdir, f"{prefix}_atac_rna_housekeeper.{ext}".strip("_")
-        #     ),
-        # )
 
     # Remove objects to free memory
     del sc_atac_rna_full_preds
@@ -385,7 +281,8 @@ def infer_reader(fname: str, mode: str = "atac") -> Callable:
 
 def build_parser():
     parser = argparse.ArgumentParser(
-        usage=__doc__, formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        usage=__doc__,
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
         "--checkpoint",
@@ -461,18 +358,21 @@ def load_rna_files_for_eval(
             k: v for k, v in rna_data_kwargs.items() if not k.startswith("filt_")
         }
     rna_data_kwargs["fname"] = data
-    if data[0].endswith(".h5ad"):
-        logging.info(f"Autodetected h5ad AnnData input, adjusting reader func")
-        rna_data_kwargs["reader"] = functools.partial(
-            utils.sc_read_multi_files, reader=ad.read_h5ad
-        )
+    reader_func = functools.partial(
+        utils.sc_read_multi_files,
+        reader=lambda x: sc_data_loaders.repool_genes(
+            utils.get_ad_reader(x, ft_type="Gene Expression")(x), rna_genes
+        ),
+    )
+    rna_data_kwargs["reader"] = reader_func
     try:
         sc_rna_full_dataset = sc_data_loaders.SingleCellDataset(
-            mode="all", **rna_data_kwargs,
+            mode="all",
+            **rna_data_kwargs,
         )
         assert all(
             [x == y for x, y in zip(rna_genes, sc_rna_full_dataset.data_raw.var_names)]
-        ), "Found mismatched gene set"
+        ), "Mismatched genes"
         _temp = sc_rna_full_dataset[0]  # Try that query works
         # adata_utils.find_marker_genes(sc_rna_full_dataset.data_raw, n_genes=25)
         # marker_genes = adata_utils.flatten_marker_genes(
@@ -499,7 +399,7 @@ def load_atac_files_for_eval(
     checkpoint: str,
     atac_bins_list_fname: str = "",
     lift_hg19_to_hg39: bool = False,
-    predefined_split: List[str] = None,
+    predefined_split=None,
 ):
     """Load the ATAC files for evaluation"""
     if not atac_bins_list_fname:
@@ -522,7 +422,8 @@ def load_atac_files_for_eval(
         atac_data_kwargs["reader"] = functools.partial(
             utils.sc_read_multi_files,
             reader=lambda x: sc_data_loaders.repool_atac_bins(
-                infer_reader(data[0], mode="atac")(x), atac_bins,
+                infer_reader(data[0], mode="atac")(x),
+                atac_bins,
             ),
         )
     else:  # Requires liftover
@@ -580,7 +481,11 @@ def main():
         rna_genes,
         marker_genes,
         housekeeper_genes,
-    ) = load_rna_files_for_eval(args.data, args.checkpoint[0], args.genes,)
+    ) = load_rna_files_for_eval(
+        args.data,
+        args.checkpoint[0],
+        args.genes,
+    )
 
     if hasattr(sc_rna_full_dataset, "size_norm_counts"):
         logging.info("Writing truth RNA size normalized counts")
@@ -593,9 +498,7 @@ def main():
         args.checkpoint[0],
         args.bins,
         args.liftHg19toHg38,
-        list(sc_rna_full_dataset.data_raw.obs_names)
-        if hasattr(sc_rna_full_dataset, "data_raw")
-        else None,
+        sc_rna_full_dataset if hasattr(sc_rna_full_dataset, "data_raw") else None,
     )
     # Write out the truth
     if hasattr(sc_atac_full_dataset, "data_raw"):
@@ -620,7 +523,9 @@ def main():
 
     # Build the dual combined dataset
     sc_dual_full_dataset = sc_data_loaders.PairedDataset(
-        sc_rna_full_dataset, sc_atac_full_dataset, flat_mode=True,
+        sc_rna_full_dataset,
+        sc_atac_full_dataset,
+        flat_mode=True,
     )
 
     # Write some basic outputs related to variable and obs names
@@ -652,12 +557,6 @@ def main():
         spliced_net = model_utils.load_model(
             ckpt,
             prefix=args.prefix,
-            input_dim1=sc_rna_full_dataset.data_raw.shape[1]
-            if isinstance(sc_rna_full_dataset, sc_data_loaders.SingleCellDataset)
-            else sc_rna_full_dataset.shape,
-            input_dim2=sc_atac_full_dataset.get_per_chrom_feature_count()
-            if isinstance(sc_atac_full_dataset, sc_data_loaders.SingleCellDataset)
-            else sc_data_loaders.atac_intervals_to_bins_per_chrom(atac_bins),
             device=args.device,
         )
 
