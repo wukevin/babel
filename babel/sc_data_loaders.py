@@ -4,6 +4,7 @@ Code for loading in single-cell datasets
 
 import os
 import sys
+import copy
 import platform
 import glob
 import subprocess
@@ -21,6 +22,7 @@ import re
 from typing import *
 
 import intervaltree
+from cached_property import cached_property
 
 import numpy as np
 import pandas as pd
@@ -29,6 +31,8 @@ import scipy.sparse
 import matplotlib.pyplot as plt
 import scanpy as sc
 from anndata import AnnData
+
+import tqdm
 
 import torch
 import torch.nn as nn
@@ -51,6 +55,8 @@ SC_RNA_ATAC_DIR = os.path.join(DATA_DIR, "sc_rnaseq_atacseq")
 assert os.path.isdir(SC_RNA_ATAC_DIR)
 MM9_GTF = os.path.join(DATA_DIR, "Mus_musculus.NCBIM37.67.gtf.gz")
 assert os.path.isfile(MM9_GTF)
+MM10_GTF = os.path.join(DATA_DIR, "gencode.vM7.annotation.gtf.gz")
+assert os.path.isfile(MM10_GTF)
 HG38_GTF = os.path.join(DATA_DIR, "Homo_sapiens.GRCh38.100.gtf.gz")
 assert os.path.isfile(HG38_GTF)
 HG19_GTF = os.path.join(DATA_DIR, "Homo_sapiens.GRCh37.87.gtf.gz")
@@ -91,7 +97,7 @@ SNARESEQ_ATAC_DATA_KWARGS = {
     "filt_gene_min_counts": 5,  # From SNAREseq paper methods section: "peaks with fewer than five counts overall"
     "filt_gene_min_cells": 5,  # From SCALE - choose to keep peaks seek in >= 5 cells
     "filt_gene_max_cells": 0.1,  # From SNAREseq paper methods section: filter peaks expressing in more than 10% of cells
-    "pool_genomic_interval": 500,  # Smaller bin size because we can handle it
+    "pool_genomic_interval": 0,  # Smaller bin size because we can handle it
     "normalize": False,  # True,
     "log_trans": False,  # True,
     "y_mode": "x",
@@ -128,7 +134,7 @@ SNARESEQ_RNA_DATA_KWARGS = {
     "transpose": True,
     "selfsupervise": True,
     "binarize": False,
-    "gtf_file": MM9_GTF,
+    "gtf_file": MM10_GTF,
     "autosomes_only": True,
     "sort_by_pos": True,
     "split_by_chrom": True,
@@ -222,13 +228,14 @@ class SingleCellDataset(Dataset):
         self,
         fname: Union[str, List[str]],
         reader: Callable = sc_read_mtx,
+        raw_adata: Union[AnnData, None] = None,  # Should be raw data
         transpose: bool = True,
-        mode: str = "train",
+        mode: str = "all",
         data_split_by_cluster: str = "leiden",  # Specify as leiden
         valid_cluster_id: int = 0,  # Only used if data_split_by_cluster is on
         test_cluster_id: int = 1,
         data_split_by_cluster_log: bool = True,
-        predefined_split: List[str] = None,
+        predefined_split=None,  # of type SingleCellDataset
         cell_info: pd.DataFrame = None,
         gene_info: pd.DataFrame = None,
         selfsupervise: bool = True,
@@ -242,7 +249,6 @@ class SingleCellDataset(Dataset):
         filt_gene_min_cells=None,
         filt_gene_max_cells=None,
         pool_genomic_interval: Union[int, List[str]] = 0,
-        top_n_features: int = 0,
         calc_size_factors: bool = True,
         normalize: bool = True,
         log_trans: bool = True,
@@ -260,7 +266,7 @@ class SingleCellDataset(Dataset):
         filter_features: dict = {},
         filter_samples: dict = {},
         transforms: List[Callable] = [],
-        gtf_file: str = MM9_GTF,  # GTF file mapping genes to chromosomes, unused for ATAC
+        gtf_file: str = MM10_GTF,  # GTF file mapping genes to chromosomes, unused for ATAC
         cluster_res: float = 2.0,
         cache_prefix: str = "",
     ):
@@ -269,13 +275,9 @@ class SingleCellDataset(Dataset):
         Binarize will turn all counts into binary 0/1 indicators before running normalization code
         If pool_genomic_interval is -1, then we pool based on proximity to gene
         """
-        assert mode in [
-            "train",
-            "valid",
-            "trainvalid",
-            "test",
-            "all",
-        ], f"Unrecognized mode: {mode}"
+        assert (
+            mode == "all"
+        ), "SingleCellDataset now operates as a full dataset only. Use SingleCellDatasetSplit to define data splits"
         assert y_mode in [
             "size_norm",
             "log_size_norm",
@@ -305,12 +307,17 @@ class SingleCellDataset(Dataset):
         self.valid_cluster_id = valid_cluster_id
         self.test_cluster_id = test_cluster_id
         self.data_split_by_cluster_log = data_split_by_cluster_log
-        self.predefined_split = predefined_split
 
-        self.data_raw = reader(fname)
+        if raw_adata is not None:
+            logging.info(
+                f"Got AnnData object {str(raw_adata)}, ignoring reader/fname args"
+            )
+            self.data_raw = raw_adata
+        else:
+            self.data_raw = reader(fname)
         assert isinstance(
             self.data_raw, AnnData
-        ), f"Reader must return AnnData but got {type(self.data_raw)}"
+        ), f"Expected AnnData but got {type(self.data_raw)}"
         if not isinstance(self.data_raw.X, scipy.sparse.csr_matrix):
             self.data_raw.X = scipy.sparse.csr_matrix(
                 self.data_raw.X
@@ -398,7 +405,6 @@ class SingleCellDataset(Dataset):
         self.data_raw = adata_utils.normalize_count_table(  # Normalizes in place
             self.data_raw,
             size_factors=calc_size_factors,
-            top_n=top_n_features,
             normalize=normalize,
             log_trans=log_trans,
         )
@@ -423,14 +429,25 @@ class SingleCellDataset(Dataset):
             self.data_raw.X = scipy.sparse.csr_matrix(self.data_raw.X)
 
         # Do all normalization before we split to make sure all folds get the same normalization
-        if self.predefined_split is not None:
+        if predefined_split is not None:
             logging.info("Got predefined split, ignoring mode")
+            # Subset items
             self.data_raw = self.data_raw[
-                [i for i in self.predefined_split if i in self.data_raw.obs.index],
+                [
+                    i
+                    for i in predefined_split.data_raw.obs.index
+                    if i in self.data_raw.obs.index
+                ],
             ]
+            assert (
+                self.data_raw.n_obs > 0
+            ), "No intersected obs names from predefined split"
+            # Carry over cluster indexing
+            self.data_split_to_idx = copy.copy(predefined_split.data_split_to_idx)
         else:
+            # Create dicts mapping string to list of indices
             if self.data_split_by_cluster:
-                self.__split_train_valid_test_cluster(
+                self.data_split_to_idx = self.__split_train_valid_test_cluster(
                     clustering_key=self.data_split_by_cluster
                     if isinstance(self.data_split_by_cluster, str)
                     else "leiden",
@@ -438,7 +455,7 @@ class SingleCellDataset(Dataset):
                     test_cluster={str(self.test_cluster_id)},
                 )
             else:
-                self.__split_train_valid_test()
+                self.data_split_to_idx = self.__split_train_valid_test()
 
         self.size_factors = (
             torch.from_numpy(self.data_raw.obs.size_factors.values).type(
@@ -491,7 +508,8 @@ class SingleCellDataset(Dataset):
                     list(self.data_raw.var.index), interval=pool_genomic_interval
                 )
                 data_raw_aggregated = combine_array_cols_by_idx(  # Returns np ndarray
-                    self.data_raw.X, idx,
+                    self.data_raw.X,
+                    idx,
                 )
                 data_raw_aggregated = scipy.sparse.csr_matrix(data_raw_aggregated)
                 self.data_raw = AnnData(
@@ -517,7 +535,10 @@ class SingleCellDataset(Dataset):
                 self.data_raw.var.index, target_intervals=pool_genomic_interval
             )
             data_raw_aggregated = scipy.sparse.csr_matrix(
-                combine_array_cols_by_idx(self.data_raw.X, idx,)
+                combine_array_cols_by_idx(
+                    self.data_raw.X,
+                    idx,
+                )
             )
             self.data_raw = AnnData(
                 data_raw_aggregated,
@@ -530,38 +551,29 @@ class SingleCellDataset(Dataset):
             )
         assert self.data_raw.n_obs == n_obs
 
-    def __split_train_valid_test(self):
+    def __split_train_valid_test(self) -> Dict[str, List[int]]:
         """
-        Split the dataset into the appropriate split
+        Split the dataset into the appropriate split, returning the indices of split
         """
-        if self.mode != "all":  # Subset data based on which set we're getting
-            logging.warning(
-                f"Constructing {self.mode} random data split - not recommended due to potential leakage between data split"
-            )
-            indices = np.arange(self.data_raw.n_obs)
-            (
-                indices_train,
-                indices_valid,
-                indices_test,
-            ) = shuffle_indices_train_valid_test(
-                indices, shuffle=True, seed=1234, valid=0.15, test=0.15
-            )
-            if self.mode == "train":
-                self.data_raw = self.data_raw[indices_train]
-            elif self.mode == "valid":
-                self.data_raw = self.data_raw[indices_valid]
-            elif self.mode == "trainvalid":
-                self.data_raw = self.data_raw[
-                    np.concatenate((indices_train, indices_valid))
-                ]
-            elif self.mode == "test":
-                self.data_raw = self.data_raw[indices_test]
-            else:
-                raise ValueError(f"Unrecognized data split mode: {self.mode}")
+        logging.warning(
+            f"Constructing {self.mode} random data split - not recommended due to potential leakage between data split"
+        )
+        indices = np.arange(self.data_raw.n_obs)
+        (train_idx, valid_idx, test_idx,) = shuffle_indices_train_valid_test(
+            indices, shuffle=True, seed=1234, valid=0.15, test=0.15
+        )
+        assert train_idx, "Got empty training split"
+        assert valid_idx, "Got empty validation split"
+        assert test_idx, "Got empty test split"
+        data_split_idx = {}
+        data_split_idx["train"] = train_idx
+        data_split_idx["valid"] = valid_idx
+        data_split_idx["test"] = test_idx
+        return data_split_idx
 
     def __split_train_valid_test_cluster(
         self, clustering_key: str = "leiden", valid_cluster={"0"}, test_cluster={"1"}
-    ) -> None:
+    ) -> Dict[str, List[int]]:
         """
         Splits the dataset into appropriate split based on clustering
         Retains similarly sized splits as train/valid/test random from above
@@ -573,54 +585,36 @@ class SingleCellDataset(Dataset):
             raise ValueError(
                 f"Invalid clustering key for data splits: {clustering_key}"
             )
-        if self.mode != "all":
-            logging.info(
-                f"Constructing {self.mode} {clustering_key} {'log' if self.data_split_by_cluster_log else 'linear'} clustered data split with valid test cluster {valid_cluster} {test_cluster}"
-            )
-            cluster_labels = (
-                self.size_norm_log_counts.obs[clustering_key]
-                if self.data_split_by_cluster_log
-                else self.size_norm_counts.obs[clustering_key]
-            )
-            cluster_labels_counter = collections.Counter(cluster_labels.to_list())
-            assert not valid_cluster.intersection(
-                test_cluster
-            ), "Valid and test clusters overlap"
+        logging.info(
+            f"Constructing {clustering_key} {'log' if self.data_split_by_cluster_log else 'linear'} clustered data split with valid test cluster {valid_cluster} {test_cluster}"
+        )
+        cluster_labels = (
+            self.size_norm_log_counts.obs[clustering_key]
+            if self.data_split_by_cluster_log
+            else self.size_norm_counts.obs[clustering_key]
+        )
+        cluster_labels_counter = collections.Counter(cluster_labels.to_list())
+        assert not valid_cluster.intersection(
+            test_cluster
+        ), "Valid and test clusters overlap"
 
-            train_idx, valid_idx, test_idx = [], [], []
-            for i, label in enumerate(cluster_labels):
-                if label in valid_cluster:
-                    valid_idx.append(i)
-                elif label in test_cluster:
-                    test_idx.append(i)
-                else:
-                    train_idx.append(i)
-
-            assert train_idx, "Got empty training split"
-            assert valid_idx, "Got empty validation split"
-            assert test_idx, "Got empty test split"
-
-            if self.mode == "train":
-                idx_to_keep = train_idx
-            elif self.mode == "valid":
-                idx_to_keep = valid_idx
-            elif self.mode == "test":
-                idx_to_keep = test_idx
+        train_idx, valid_idx, test_idx = [], [], []
+        for i, label in enumerate(cluster_labels):
+            if label in valid_cluster:
+                valid_idx.append(i)
+            elif label in test_cluster:
+                test_idx.append(i)
             else:
-                raise ValueError(f"Unrecognzied data split mode: {self.mode}")
+                train_idx.append(i)
 
-            self.data_raw = self.data_raw[idx_to_keep]
-            if hasattr(self, "_size_norm_counts"):
-                self._size_norm_counts = self._size_norm_counts[idx_to_keep]
-                assert self._size_norm_counts.shape == self.data_raw.shape
-            if hasattr(self, "_size_norm_log_counts"):
-                self._size_norm_log_counts = self._size_norm_log_counts[idx_to_keep]
-                assert self._size_norm_log_counts.shape == self.data_raw.shape
-            logging.info(
-                f"Built {self.mode} clustered data split with {self.data_raw.shape[0]} samples"
-            )
-        else:
-            logging.info("Got data split for all data, skipping data splitting")
+        assert train_idx, "Got empty training split"
+        assert valid_idx, "Got empty validation split"
+        assert test_idx, "Got empty test split"
+        data_split_idx = {}
+        data_split_idx["train"] = train_idx
+        data_split_idx["valid"] = valid_idx
+        data_split_idx["test"] = test_idx
+        return data_split_idx
 
     def __sample_similar_cell(self, i, threshold=5, leakage=0.1) -> None:
         """
@@ -678,6 +672,14 @@ class SingleCellDataset(Dataset):
     def __len__(self):
         """Number of examples"""
         return self.data_raw.n_obs
+
+    def get_item_data_split(self, idx: int, split: str):
+        """Get the i-th item in the split (e.g. train)"""
+        assert split in ["train", "valid", "test", "all"]
+        if split == "all":
+            return self.__getitem__(idx)
+        else:
+            return self.__getitem__(self.data_split_to_idx[split][idx])
 
     def __getitem__(self, i):
         # TODO compatibility with slices
@@ -761,6 +763,7 @@ class SingleCellDataset(Dataset):
         return self._size_norm_counts
 
     def _set_size_norm_counts(self) -> AnnData:
+        logging.info(f"Setting size normalized counts")
         raw_counts_anndata = AnnData(
             scipy.sparse.csr_matrix(self.data_raw.raw.X),
             obs=pd.DataFrame(index=self.data_raw.obs_names),
@@ -785,6 +788,7 @@ class SingleCellDataset(Dataset):
 
     def _set_size_norm_log_counts(self) -> AnnData:
         retval = self.size_norm_counts.copy()  # Generates a new copy
+        logging.info(f"Setting log-normalized size-normalized counts")
         # Apply log to it
         sc.pp.log1p(retval, chunked=True, copy=False, chunk_size=10000)
         plot_utils.preprocess_anndata(
@@ -821,9 +825,49 @@ class SingleCellDataset(Dataset):
                 )
             aggs.append(pbulk_aggregate)
         retval = AnnData(
-            np.vstack(aggs), obs={mode: cluster_labels}, var=self.data_raw.var,
+            np.vstack(aggs),
+            obs={mode: cluster_labels},
+            var=self.data_raw.var,
         )
         return retval
+
+
+class SingleCellDatasetSplit(Dataset):
+    """
+    Wraps SingleCellDataset to provide train/valid/test splits
+    """
+
+    def __init__(self, sc_dataset: SingleCellDataset, split: str) -> None:
+        assert isinstance(sc_dataset, SingleCellDataset)
+        self.dset = sc_dataset  # Full dataset
+        self.split = split
+        assert self.split in self.dset.data_split_to_idx
+        logging.info(
+            f"Created {split} data split with {len(self.dset.data_split_to_idx[self.split])} examples"
+        )
+
+    def __len__(self) -> int:
+        return len(self.dset.data_split_to_idx[self.split])
+
+    def __getitem__(self, index: int):
+        return self.dset.get_item_data_split(index, self.split)
+
+    # These properties facilitate compatibility with old code by forwarding some properties
+    # Note that these are NOT meant to be modified
+    @cached_property
+    def size_norm_counts(self) -> AnnData:
+        indices = self.dset.data_split_to_idx[self.split]
+        return self.dset.size_norm_counts[indices].copy()
+
+    @cached_property
+    def data_raw(self) -> AnnData:
+        indices = self.dset.data_split_to_idx[self.split]
+        return self.dset.data_raw[indices].copy()
+
+    @cached_property
+    def obs_names(self):
+        indices = self.dset.data_split_to_idx[self.split]
+        return self.dset.data_raw.obs_names[indices]
 
 
 class SingleCellProteinDataset(Dataset):
@@ -863,7 +907,9 @@ class SingleCellProteinDataset(Dataset):
         clr_counts = clr_transform(utils.ensure_arr(self.raw_counts.X))
         # Use data_raw to be more similar to SingleCellDataset
         self.data_raw = AnnData(
-            clr_counts, obs=self.raw_counts.obs, var=self.raw_counts.var,
+            clr_counts,
+            obs=self.raw_counts.obs,
+            var=self.raw_counts.var,
         )
         self.data_raw.raw = self.raw_counts
 
@@ -933,20 +979,20 @@ class SplicedDataset(Dataset):
         self.flat_mode = flat_mode
 
         self.obs_names = None
-        if hasattr(dataset_x, "data_raw") and hasattr(dataset_y, "data_raw"):
+        x_obs_names = obs_names_from_dataset(dataset_x)
+        y_obs_names = obs_names_from_dataset(dataset_y)
+        if x_obs_names is not None and y_obs_names is not None:
             logging.info("Checking obs names for two input datasets")
-            x_obs_names = dataset_x.data_raw.obs_names
-            y_obs_names = dataset_y.data_raw.obs_names
             for i, (x, y) in enumerate(zip(x_obs_names, y_obs_names)):
                 if x != y:
                     raise ValueError(
                         f"Datasets have a different label at the {i}th index: {x} {y}"
                     )
             self.obs_names = list(x_obs_names)
-        elif hasattr(dataset_x, "data_raw"):
-            self.obs_names = list(dataset_x.data_raw.obs_names)
-        elif hasattr(dataset_y, "data_raw"):
-            self.obs_names = list(dataset_y.data_raw.obs_names)
+        elif x_obs_names is not None:
+            self.obs_names = x_obs_names
+        elif y_obs_names is not None:
+            self.obs_names = y_obs_names
         else:
             raise ValueError("Both components of combined dataset appear to be dummy")
 
@@ -985,8 +1031,10 @@ class PairedDataset(SplicedDataset):
     # Inherits the init from SplicedDataset since we're doing the same thing - recording
     # the two different datasets
     def __getitem__(self, i):
-        x_pair = (self.dataset_x[i][0], self.dataset_y[i][0])
-        y_pair = (self.dataset_x[i][1], self.dataset_y[i][1])
+        x1 = self.dataset_x[i]
+        x2 = self.dataset_y[i]
+        x_pair = (x1[0], x2[0])
+        y_pair = (x1[1], x2[1])
         if not self.flat_mode:
             return x_pair, y_pair
         else:
@@ -1045,147 +1093,6 @@ class EncodedDataset(Dataset):
         return torch.from_numpy(enc).type(torch.FloatTensor), x_orig[-1]
 
 
-class SingleCellRnaDataset(Dataset):
-    """
-    Loads in single-cell RNA-seq dataset from Duren et al.
-    https://doi.org/10.1073/pnas.1805681115
-    """
-
-    def __init__(
-        self,
-        mode: str = "train",
-        selfsupervise: bool = True,
-        normalize: bool = True,
-        raw_count_as_y=True,
-        return_sf=True,
-    ):
-        """
-        If selfsupervise is True, the y label for each output is input itself
-        If log2trans is true, log2-transform the expression values to have a better behaved range
-        If g_order is true, reorder gene features by genomic location in the mouse genome
-        """
-        assert mode in ["train", "valid", "test", "all"], f"Unrecognized mode: {mode}"
-        self.mode = mode
-        self.selfsupervise = selfsupervise
-        self.raw_count_as_y = raw_count_as_y
-        self.return_sf = return_sf
-        if not self.selfsupervise:
-            raise NotImplementedError(
-                f"scRNA has defined labels, must be self supervised"
-            )
-
-        self.data_raw = sc.read_text(
-            os.path.join(SC_RNA_ATAC_DIR, "GSE115968_scRNA-seq_RA_D4.txt.gz"),
-            delimiter="\t",
-        ).T  # Data needs to be transposed
-        if normalize:
-            self.data_raw = adata_utils.normalize_count_table(
-                self.data_raw, size_factors=True, normalize=True, log_trans=True
-            )
-
-        if self.mode != "all":  # Drop data based on which set we're getting
-            indices = np.arange(self.data_raw.n_obs)
-            (
-                indices_train,
-                indices_valid,
-                indices_test,
-            ) = shuffle_indices_train_valid_test(indices, shuffle=True, seed=1234)
-            if self.mode == "train":
-                self.data_raw = self.data_raw[indices_train]
-            elif self.mode == "valid":
-                self.data_raw = self.data_raw[indices_valid]
-            elif self.mode == "test":
-                self.data_raw = self.data_raw[indices_test]
-            else:
-                raise ValueError(f"Unrecognized mode: {self.mode}")
-        assert not np.any(pd.isnull(self.data_raw))
-
-        self.data = torch.from_numpy(self.data_raw.X).type(torch.FloatTensor)
-        self.size_factors = torch.from_numpy(
-            self.data_raw.obs.size_factors.values
-        ).type(torch.FloatTensor)
-        self.data_counts = torch.from_numpy(self.data_raw.raw.X).type(torch.FloatTensor)
-
-    def __len__(self):
-        """Number of examples"""
-        return self.data_raw.n_obs
-
-    def __getitem__(self, i):
-        """ith example"""
-        expression_data = self.data[i]
-        target = self.data[i] if not self.raw_count_as_y else self.data_counts[i]
-
-        if self.return_sf:
-            sf = self.size_factors[i]
-            return expression_data, sf, target
-        else:
-            return expression_data, target
-
-
-class SingleCellAtacDataset(Dataset):
-    """
-    Loads in single-cell ATAC-seq dataset from Duren et al.
-    https://doi.org/10.1073/pnas.1805681115
-    """
-
-    def __init__(
-        self, mode: str = "train", selfsupervise: bool = True, log2trans: bool = True
-    ):
-        assert mode in ["train", "valid", "test", "all"], f"Unrecognized mode: {mode}"
-        self.mode = mode
-        self.selfsupervise = selfsupervise
-        if not self.selfsupervise:
-            raise NotImplementedError(
-                f"scATAC has defined labels, must be self supervised"
-            )
-
-        self.data_raw = pd.read_csv(
-            os.path.join(SC_RNA_ATAC_DIR, "GSE115970_scATAC-seq_RA_D4.txt.gz"),
-            delimiter="\t",
-            index_col=0,
-        )
-        if log2trans:
-            self.data_raw = np.log2(self.data_raw + 1)  # Add 1 so log(0) doesn't error
-        # Drop subset of data based on train/valid/test
-        if self.mode != "all":
-            indices = np.arange(len(self.data_raw.columns))
-            np.random.seed(1234)  # For reproducible subsampling
-            np.random.shuffle(indices)  # Shuffles inplace
-            num_train = int(round(len(self.data_raw.columns) * 0.7))
-            num_valid = int(round(len(self.data_raw.columns) * 0.15))
-            num_test = len(self.data_raw.columns) - num_train - num_valid
-            assert num_train > 0 and num_valid > 0 and num_test > 0
-            assert num_train + num_valid + num_test == len(self.data_raw.columns)
-            indices_train = indices[:num_train]
-            indices_valid = indices[num_train : num_train + num_valid]
-            indices_test = indices[-num_test:]
-            if self.mode == "train":
-                self.data_raw = self.data_raw.iloc[:, indices_train]
-            elif self.mode == "valid":
-                self.data_raw = self.data_raw.iloc[:, indices_valid]
-            elif self.mode == "test":
-                self.data_raw = self.data_raw.iloc[:, indices_test]
-            else:
-                raise ValueError(f"Unrecognized mode: {self.mode}")
-
-        assert not np.any(pd.isnull(self.data_raw))
-
-        self.feature_names = self.data_raw.index
-        self.sample_names = self.data_raw.columns
-        self.data = torch.from_numpy(self.data_raw.values.T).type(torch.FloatTensor)
-
-    def __len__(self):
-        """Number of examples"""
-        return len(self.sample_names)
-
-    def __getitem__(self, i):
-        """ith example"""
-        expression_data = self.data[i]
-        target = self.data[i]
-
-        return expression_data, target
-
-
 class SimSingleCellRnaDataset(Dataset):
     """Loads in the simulated single cell dataset"""
 
@@ -1225,7 +1132,9 @@ class SimSingleCellRnaDataset(Dataset):
                 indices_valid,
                 indices_test,
             ) = shuffle_indices_train_valid_test(
-                np.arange(self.data_raw.n_obs), test=0, valid=0.2,
+                np.arange(self.data_raw.n_obs),
+                test=0,
+                valid=0.2,
             )
             if self.mode == "train":
                 self.data_raw = self.data_raw[indices_train]
@@ -1290,6 +1199,17 @@ class SimSingleCellRnaDataset(Dataset):
             sf = self.size_factors[i]
             return expression_data, sf, target
         return expression_data, target
+
+
+def obs_names_from_dataset(dset: Dataset) -> Union[List[str], None]:
+    """Extract obs names from a dataset, or None if this fails"""
+    if isinstance(dset, DummyDataset):
+        return None
+    elif isinstance(dset, SingleCellDatasetSplit):
+        return list(dset.obs_names)
+    elif isinstance(dset.data_raw, AnnData):
+        return list(dset.data_raw.obs_names)
+    return None
 
 
 def sparse_var(x: Union[scipy.sparse.csr_matrix, scipy.sparse.csc_matrix], axis=0):
@@ -1412,95 +1332,6 @@ def shuffle_indices_train_valid_test(
     return indices_train, indices_valid, indices_test
 
 
-@functools.lru_cache(maxsize=2, typed=True)
-def read_gtf_gene_to_pos(
-    fname: str = MM9_GTF,
-    acceptable_types: List[str] = None,
-    addtl_attr_filters: dict = None,
-    extend_upstream: int = 0,
-    extend_downstream: int = 0,
-) -> Dict[str, Tuple[str, int, int]]:
-    """
-    Given a gtf file, read it in and return as a ordered dictionary mapping genes to genomic ranges
-    Ordering is done by chromosome then by position
-    """
-    # https://uswest.ensembl.org/info/website/upload/gff.html
-    gene_to_positions = collections.defaultdict(list)
-    gene_to_chroms = collections.defaultdict(set)
-
-    opener = gzip.open if fname.endswith(".gz") else open
-    with opener(fname) as source:
-        for line in source:
-            if line.startswith(b"#"):
-                continue
-            line = line.decode()
-            (
-                chrom,
-                entry_type,
-                entry_class,
-                start,
-                end,
-                score,
-                strand,
-                frame,
-                attrs,
-            ) = line.strip().split("\t")
-            assert strand in ("+", "-")
-            if acceptable_types and entry_type not in acceptable_types:
-                continue
-            attr_dict = dict(
-                [t.strip().split(" ", 1) for t in attrs.strip().split(";") if t]
-            )
-            if addtl_attr_filters:
-                tripped_attr_filter = False
-                for k, v in addtl_attr_filters.items():
-                    if k in attr_dict:
-                        if isinstance(v, str):
-                            if v != attr_dict[k].strip('"'):
-                                tripped_attr_filter = True
-                                break
-                        else:
-                            raise NotImplementedError
-                if tripped_attr_filter:
-                    continue
-            gene = attr_dict["gene_name"].strip('"')
-            start = int(start)
-            end = int(end)
-            assert (
-                start <= end
-            ), f"Start {start} is not less than end {end} for {gene} with strand {strand}"
-            if extend_upstream:
-                if strand == "+":
-                    start -= extend_upstream
-                else:
-                    end += extend_upstream
-            if extend_downstream:
-                if strand == "+":
-                    end += extend_downstream
-                else:
-                    start -= extend_downstream
-
-            gene_to_positions[gene].append(start)
-            gene_to_positions[gene].append(end)
-            gene_to_chroms[gene].add(chrom)
-
-    slist = sortedcontainers.SortedList()
-    for gene, chroms in gene_to_chroms.items():
-        if len(chroms) != 1:
-            logging.warn(
-                f"Got multiple chromosomes for gene {gene}: {chroms}, skipping"
-            )
-            continue
-        positions = gene_to_positions[gene]
-        t = (chroms.pop(), min(positions), max(positions), gene)
-        slist.add(t)
-
-    retval = collections.OrderedDict()
-    for chrom, start, stop, gene in slist:
-        retval[gene] = (chrom, start, stop)
-    return retval
-
-
 def gene_pos_dict_to_range(gene_pos_dict: dict, remove_overlaps: bool = False):
     """
     Converts the dictionary of genes to positions to a intervaltree
@@ -1521,17 +1352,19 @@ def gene_pos_dict_to_range(gene_pos_dict: dict, remove_overlaps: bool = False):
 
 
 def reorder_genes_by_pos(
-    genes, gtf_file=MM9_GTF, return_genes=False, return_chrom=False
+    genes, gtf_file=MM10_GTF, return_genes=False, return_chrom=False
 ):
     """Reorders list of genes by their genomic coordinate in the given gtf"""
+    assert len(genes) > 0, "Got empty set of genes"
     genes_set = set(genes)
     genes_list = list(genes)
     assert len(genes_set) == len(genes), f"Got duplicates in genes"
 
-    genes_to_pos = read_gtf_gene_to_pos(gtf_file)
+    genes_to_pos = utils.read_gtf_gene_to_pos(gtf_file)
     genes_intersection = [
         g for g in genes_to_pos if g in genes_set
     ]  # In order of position
+    assert genes_intersection, "Got empty list of intersected genes"
     logging.info(f"{len(genes_intersection)} genes with known positions")
     genes_to_idx = {}
     for i, g in enumerate(genes_intersection):
@@ -1555,12 +1388,12 @@ def reorder_genes_by_pos(
     return retval
 
 
-def get_chrom_from_genes(genes: List[str], gtf_file=MM9_GTF):
+def get_chrom_from_genes(genes: List[str], gtf_file=MM10_GTF):
     """
     Given a list of genes, return a list of chromosomes that those genes are on
     For missing: NA
     """
-    gene_to_pos = read_gtf_gene_to_pos(gtf_file)
+    gene_to_pos = utils.read_gtf_gene_to_pos(gtf_file)
     retval = [gene_to_pos[gene][0] if gene in gene_to_pos else "NA" for gene in genes]
     return retval
 
@@ -1631,14 +1464,21 @@ def read_mtx(fname, dtype=int, chunksize=100000):
 
 
 def interval_string_to_tuple(x: str) -> Tuple[str, int, int]:
+    """
+    Convert the string to tuple
+    >>> interval_string_to_tuple("chr1:100-200")
+    ('chr1', 100, 200)
+    >>> interval_string_to_tuple("chr1:1e+06-1000199")
+    ('chr1', 1000000, 1000199)
+    """
     tokens = x.split(":")
     assert len(tokens) == 2, f"Malformed interval string: {x}"
     chrom, interval = tokens
     if not chrom.startswith("chr"):
         logging.warn(f"Got noncanonical chromsome in {x}")
-    start, stop = map(int, interval.split("-"))
+    start, stop = map(float, interval.split("-"))
     assert start < stop, f"Got invalid interval span: {x}"
-    return (chrom, start, stop)
+    return (chrom, int(start), int(stop))
 
 
 def tuple_to_interval_string(t: Tuple[str, int, int]) -> str:
@@ -1709,7 +1549,30 @@ def get_indices_to_form_target_intervals(
     return retval
 
 
-def combine_array_cols_by_idx(arr, idx, combine_func=np.sum) -> scipy.sparse.csr_matrix:
+def get_indices_to_form_target_genes(
+    genes: List[str], target_genes: List[str]
+) -> List[List[int]]:
+    """
+    Given a list of genes, and a target set of genes, return list
+    of indices to combine to map into target
+    While List[List[int]] structure isn't immediately necessary,
+    it is useful for compatibility with above
+    """
+    assert set(genes).intersection(target_genes), "No shared genes"
+    source_gene_to_idx = {gene: i for i, gene in enumerate(genes)}
+
+    retval = []
+    for target_gene in target_genes:
+        if target_gene in source_gene_to_idx:
+            retval.append([source_gene_to_idx[target_gene]])
+        else:
+            retval.append([])
+    return retval
+
+
+def combine_array_cols_by_idx(
+    arr, idx: List[List[int]], combine_func: Callable = np.sum
+) -> scipy.sparse.csr_matrix:
     """Given an array and indices, combine the specified columns, returning as a csr matrix"""
     if isinstance(arr, np.ndarray):
         arr = scipy.sparse.csc_matrix(arr)
@@ -1726,14 +1589,15 @@ def combine_array_cols_by_idx(arr, idx, combine_func=np.sum) -> scipy.sparse.csr
     for indices in idx:
         if not indices:
             next_col = scipy.sparse.csc_matrix(np.zeros((arr.shape[0], 1)))
-        else:
+        elif len(indices) == 1:
+            next_col = scipy.sparse.csc_matrix(arr.getcol(indices[0]))
+        else:  # Multiple indices to combine
             col_set = np.hstack([arr.getcol(i).toarray() for i in indices])
             next_col = scipy.sparse.csc_matrix(
                 combine_func(col_set, axis=1, keepdims=True)
             )
         new_cols.append(next_col)
-    new_mat = scipy.sparse.hstack(new_cols)
-    new_mat_sparse = scipy.sparse.csr_matrix(new_mat)
+    new_mat_sparse = scipy.sparse.hstack(new_cols).tocsr()
     assert (
         len(new_mat_sparse.shape) == 2
     ), f"Returned matrix is expected to be 2 dimensional, but got shape {new_mat_sparse.shape}"
@@ -1742,7 +1606,7 @@ def combine_array_cols_by_idx(arr, idx, combine_func=np.sum) -> scipy.sparse.csr
 
 
 def combine_by_proximity(
-    arr, gtf_file=MM9_GTF, start_extension: int = 10000, stop_extension: int = 10000
+    arr, gtf_file=MM10_GTF, start_extension: int = 10000, stop_extension: int = 10000
 ):
     def find_nearest(query: tuple, arr):
         """Find the index of the item in array closest to query"""
@@ -1755,10 +1619,14 @@ def combine_by_proximity(
 
     if isinstance(arr, AnnData):
         d = arr.X if isinstance(arr.X, np.ndarray) else arr.X.toarray()
-        arr = pd.DataFrame(d, index=arr.obs_names, columns=arr.var_names,)
+        arr = pd.DataFrame(
+            d,
+            index=arr.obs_names,
+            columns=arr.var_names,
+        )
     assert isinstance(arr, pd.DataFrame)
 
-    gene_to_pos = read_gtf_gene_to_pos(
+    gene_to_pos = utils.read_gtf_gene_to_pos(
         gtf_file,
         acceptable_types=["protein_coding"],
         addtl_attr_filters={"gene_biotype": "protein_coding"},
@@ -1821,7 +1689,7 @@ def _tuple_merger(x: tuple, y: tuple, token: str = ";"):
     return tuple(retval)
 
 
-def harmonize_atac_intervals(
+def _harmonize_atac_intervals(
     intervals_1: List[str], intervals_2: List[str]
 ) -> List[str]:
     """
@@ -1829,7 +1697,9 @@ def harmonize_atac_intervals(
     intervals for each chromosome
     """
 
-    def interval_list_to_itree(l: List[str],) -> Dict[str, intervaltree.IntervalTree]:
+    def interval_list_to_itree(
+        l: List[str],
+    ) -> Dict[str, intervaltree.IntervalTree]:
         """convert the dataframe to a intervaltree"""
         retval = collections.defaultdict(intervaltree.IntervalTree)
         for s in l:
@@ -1844,11 +1714,14 @@ def harmonize_atac_intervals(
     # Merge the two inputs
     merged_itree = {}
     for chrom in itree1.keys():
-        if chrom not in itree2:
-            continue
+        if chrom not in itree2:  # Unique to itree1
+            merged_itree[chrom] = itree1[chrom]
         combined = itree1[chrom] | itree2[chrom]
         combined.merge_overlaps()
         merged_itree[chrom] = combined
+    for chrom in itree2.keys():  # Unique to itree2
+        if chrom not in merged_itree:
+            merged_itree[chrom] = itree2[chrom]
 
     retval = []
     interval_spans = []
@@ -1861,6 +1734,23 @@ def harmonize_atac_intervals(
     logging.info(
         f"Average/SD interval size after merging: {np.mean(interval_spans):.4f} {np.std(interval_spans):.4f}"
     )
+    return retval
+
+
+def harmonize_atac_intervals(*intervals: List[str]) -> List[str]:
+    """
+    Given multiple intervals, harmonize them
+    >>> harmonize_atac_intervals(["chr1:100-200"], ["chr1:150-250"])
+    ['chr1:100-250']
+    >>> harmonize_atac_intervals(["chr1:100-200"], ["chr1:150-250"], ["chr1:300-350", "chr2:100-1000"])
+    ['chr1:100-250', 'chr1:300-350', 'chr2:100-1000']
+    """
+    assert len(intervals) > 0
+    if len(intervals) == 1:
+        return intervals
+    retval = _harmonize_atac_intervals(intervals[0], intervals[1])
+    for i in intervals[2:]:
+        retval = _harmonize_atac_intervals(retval, i)
     return retval
 
 
@@ -1943,11 +1833,23 @@ def repool_atac_bins(x: AnnData, target_bins: List[str]) -> AnnData:
     idx = get_indices_to_form_target_intervals(
         x.var.index, target_intervals=target_bins
     )
-    data_raw_aggregated = scipy.sparse.csr_matrix(combine_array_cols_by_idx(x.X, idx,))
+    # This already gives a sparse matrix
+    data_raw_aggregated = combine_array_cols_by_idx(x.X, idx)
     retval = AnnData(
-        data_raw_aggregated, obs=x.obs, var=pd.DataFrame(index=target_bins),
+        data_raw_aggregated,
+        obs=x.obs,
+        var=pd.DataFrame(index=target_bins),
     )
     return retval
+
+
+def repool_genes(x: AnnData, target_genes: List[str]) -> AnnData:
+    """
+    Reorder (insert/drop cols) from x to match given target genes
+    """
+    idx = get_indices_to_form_target_genes(x.var_names, target_genes=target_genes)
+    data_raw_aggregated = combine_array_cols_by_idx(x.X, idx)
+    return AnnData(data_raw_aggregated, obs=x.obs, var=pd.DataFrame(index=target_genes))
 
 
 def atac_intervals_to_bins_per_chrom(intervals: Iterable[str]) -> List[int]:
@@ -2018,29 +1920,64 @@ def clr_transform(x: np.ndarray, add_pseudocount: bool = True) -> np.ndarray:
     return retval
 
 
+def read_bird_table(fname: str, atac_bins: Iterable[str] = []) -> AnnData:
+    """Read the table outputted by BIRD. If atac_bins is given, ignore non-overlapping peaks"""
+    # Expect 1361776 lines in file
+    # create dict of interval tree from atac_bins
+    peaks_itree = collections.defaultdict(intervaltree.IntervalTree)
+    for peak in atac_bins:
+        chrom, grange = peak.split(":")
+        start, stop = (int(i) for i in grange.split("-"))
+        peaks_itree[chrom][start:stop] = peak
+
+    opener = gzip.open if fname.endswith(".gz") else open
+
+    rows = []
+    atac_intervals = []
+    with opener(fname) as source:
+        for i, line in tqdm.tqdm(enumerate(source)):
+            line = line.decode()
+            tokens = line.strip().split("\t")
+            if i == 0:
+                cell_barcodes = tokens[3:]
+                continue
+            chrom = tokens[0]
+            start = int(float(tokens[1]))
+            stop = int(float(tokens[2]))
+            # If atac_bins is given, do a check for overlap
+            if atac_bins:
+                # Check for overlap
+                if chrom not in peaks_itree or not peaks_itree[chrom][start:stop]:
+                    continue
+            interval = f"{chrom}:{start}-{stop}"
+            atac_intervals.append(interval)
+            values = scipy.sparse.csr_matrix(np.array(tokens[3:]).astype(float))
+            rows.append(values)
+
+    # Stack, tranpose to csc matrix, recast as csr matrix
+    retval = AnnData(
+        scipy.sparse.vstack(rows).T.tocsr(),
+        obs=pd.DataFrame(index=cell_barcodes),
+        var=pd.DataFrame(index=atac_intervals),
+    )
+    return retval
+
+
 def main():
     """On the fly testing"""
-    # Create the PBMC ATAC merged bins across replicates
-    temp1 = utils.sc_read_10x_h5_ft_type(
-        os.path.join(TENX_PBMC_DATA_DIR, "pbmc_rep1_filtered_feature_bc_matrix.h5"),
-        "Peaks",
+    x = read_bird_table(
+        sys.argv[1],
+        utils.read_delimited_file(
+            "/home/wukevin/projects/commonspace_models_final/cv_logsplit_01/atac_bins.txt"
+        ),
     )
-    temp2 = utils.sc_read_10x_h5_ft_type(
-        os.path.join(TENX_PBMC_DATA_DIR, "pbmc_rep2_filtered_feature_bc_matrix.h5"),
-        "Peaks",
-    )
-    pbmc_merged_atac_bins = harmonize_atac_intervals(temp1.var_names, temp2.var_names)
-    logging.info(
-        f"Got {len(pbmc_merged_atac_bins)} merged PBMC ATAC bins across 2 replicates"
-    )
-    with open(TENX_PBMC_ATAC_BINS_FILE, "w") as sink:
-        for b in pbmc_merged_atac_bins:
-            sink.write(b + "\n")
+    logging.info(f"Read in {sys.argv[1]} for {x}")
+    logging.info(f"Writing AnnData to {sys.argv[2]}")
+    x.write_h5ad(sys.argv[2])
 
 
 if __name__ == "__main__":
     import doctest
 
     doctest.testmod()
-    # main()
-    liftover_atac_adata(utils.sc_read_10x_h5_ft_type(sys.argv[1], "Peaks"))
+    main()

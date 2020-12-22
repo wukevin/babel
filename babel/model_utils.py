@@ -103,27 +103,34 @@ def load_model(
     if input_dim1 is None or input_dim1 <= 0:
         rna_genes = utils.read_delimited_file(os.path.join(checkpoint, "rna_genes.txt"))
         input_dim1 = len(rna_genes)
-    if input_dim2 is None or input_dim2 <= 0:
+        logging.info(f"Inferred RNA input dimension: {input_dim1}")
+    if input_dim2 is None or (isinstance(input_dim2, int) and input_dim2 <= 0):
         atac_bins = utils.read_delimited_file(os.path.join(checkpoint, "atac_bins.txt"))
         chrom_counter = collections.defaultdict(int)
         for b in atac_bins:
             chrom = b.split(":")[0]
             chrom_counter[chrom] += 1
-        input_dim2 = list(chrom_counter.values())
+        # input_dim2 = list(chrom_counter.values())
+        input_dim2 = [chrom_counter[c] for c in sorted(chrom_counter.keys())]
+        logging.info(
+            f"Inferred ATAC input dimension: {input_dim2} (sum={np.sum(input_dim2)})"
+        )
 
     # Dynamically determine the model we are looking at based on name
     checkpoint_basename = os.path.basename(checkpoint)
     if checkpoint_basename.startswith("naive"):
-        logging.info(f"Inferred model to be naive")
+        logging.info(f"Inferred model with basename {checkpoint_basename} to be naive")
         model_class = autoencoders.NaiveSplicedAutoEncoder
     else:
-        logging.info(f"Inferred model to be normal (non-naive)")
+        logging.info(
+            f"Inferred model with basename {checkpoint_basename} be normal (non-naive)"
+        )
         model_class = autoencoders.AssymSplicedAutoEncoder
 
     spliced_net = None
     for hidden_dim_size in [16, 32]:
         try:
-            spliced_net = autoencoders.SplicedAutoEncoderSkorchNet(
+            spliced_net_ = autoencoders.SplicedAutoEncoderSkorchNet(
                 module=model_class,
                 module__input_dim1=input_dim1,
                 module__input_dim2=input_dim2,
@@ -138,16 +145,17 @@ def load_model(
                 # iterator_valid__num_workers=8,
                 device=device_parsed,
             )
-            spliced_net.initialize()
+            spliced_net_.initialize()
             if checkpoint:
                 cp = skorch.callbacks.Checkpoint(dirname=checkpoint, fn_prefix=prefix)
-                spliced_net.load_params(checkpoint=cp)
+                spliced_net_.load_params(checkpoint=cp)
             else:
                 logging.warn("Using untrained model")
             # Upon successfully finding correct hiden size, break out of loop
             logging.info(f"Loaded model with hidden size {hidden_dim_size}")
+            spliced_net = spliced_net_
             break
-        except RuntimeError:
+        except RuntimeError as e:
             logging.info(f"Failed to load with hidden size {hidden_dim_size}")
     if spliced_net is None:
         raise RuntimeError("Could not infer hidden size")
@@ -212,23 +220,9 @@ def skorch_grid_search(skorch_net, fixed_params: dict, search_params: dict, trai
     return retval
 
 
-def build_parser():
-    """Build commandline parser"""
-    parser = argparse.ArgumentParser(
-        description="Commandline model training",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-    )
-    parser.add_argument(
-        "model_py_file", help="py file specifying architecture of model"
-    )
-    parser.add_argument("")
-    return parser
-
-
 def main():
-    """For training models from commandline"""
-    parser = build_parser()
-    args = parser.parse_args()
+    """On the fly debugging"""
+    load_model(sys.argv[1])
 
 
 if __name__ == "__main__":

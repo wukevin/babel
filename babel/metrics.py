@@ -21,6 +21,7 @@ from sklearn.metrics import (
     precision_score,
     f1_score,
     log_loss,
+    r2_score,
 )
 
 from anndata import AnnData

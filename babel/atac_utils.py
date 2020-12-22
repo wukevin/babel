@@ -26,9 +26,15 @@ import utils
 
 logging.basicConfig(level=logging.INFO)
 
+DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
+assert os.path.isdir(DATA_DIR)
+HG38_GTF = os.path.join(DATA_DIR, "Homo_sapiens.GRCh38.100.gtf.gz")
+assert os.path.isfile(HG38_GTF)
+
 
 def binarize_preds(
-    preds: np.ndarray, raw: Union[np.ndarray, sparse.csr_matrix, sparse.csc_matrix]
+    preds: np.ndarray,
+    raw: Union[np.ndarray, scipy.sparse.csr_matrix, scipy.sparse.csc_matrix],
 ) -> np.ndarray:
     """
     Binarize the predicted matrix of floats based on the following:
@@ -72,8 +78,69 @@ def fragments_from_frag_tsv(
     raise StopIteration
 
 
+def closest_feature(
+    query_regions: List[str], gtf_file: str = HG38_GTF, max_dist: int = 100000
+) -> pd.DataFrame:
+    """
+    Find the closest feature to each of the given queries
+    Very loosely based on: https://satijalab.org/signac/reference/ClosestFeature.html
+    Returns a dataframe with columns:
+    match_tx_id, match_gene_name, match_gene_id, match_gene_biotype, match_type, match_closest_region, distance
+    """
+    matched_rows = []
+    reference_features = utils.read_gtf_pos_to_features()
+    for region in query_regions:
+        region_gi = genomic_interval.GenomicInterval(region)
+        matches = list(
+            reference_features[region_gi.chrom].overlap(
+                region_gi.start - max_dist, region_gi.stop + max_dist
+            )
+        )
+        if not matches:
+            continue
+        matches_gi = [
+            genomic_interval.GenomicInterval((region_gi.chrom, m.begin, m.end))
+            for m in matches
+        ]
+        distances = np.array([region_gi.difference(m) for m in matches_gi])
+        min_dist = np.min(distances)
+        min_indices = np.where(distances == min_dist)[0]
+        for i in min_indices:
+            # Cast as defaultdict to automatically return null when key missing
+            match_coords = matches[i].begin, matches[i].end
+            match = collections.defaultdict(str, matches[i].data)
+            matched_rows.append(
+                (
+                    match["transcript_id"],
+                    match["gene_name"],
+                    match["gene_id"],
+                    match["gene_biotype"],
+                    match["entry_type"],
+                    f"{region_gi.chrom}-{match_coords[0]}:{match_coords[1]}",
+                    str(region_gi),
+                    min_dist,
+                )
+            )
+    retval = pd.DataFrame(
+        matched_rows,
+        columns=[
+            "tx_id",
+            "gene_name",
+            "gene_id",
+            "gene_biotype",
+            "type",
+            "closest_region",
+            "query_region",
+            "distance",
+        ],
+    )
+    return retval
+
+
 def gene_activity_matrix_from_frags(
-    frag_file: str, annotation: str = sc_data_loaders.HG38_GTF, size_norm: bool = False,
+    frag_file: str,
+    annotation: str = sc_data_loaders.HG38_GTF,
+    size_norm: bool = False,
 ) -> ad.AnnData:
     """
     Create a gene activity matrix
@@ -81,7 +148,7 @@ def gene_activity_matrix_from_frags(
     Count number of overlapping fragments
     Source: https://satijalab.org/signac/articles/pbmc_vignette.html
     """
-    gene_to_pos = sc_data_loaders.read_gtf_gene_to_pos(annotation, extend_upstream=2000)
+    gene_to_pos = utils.read_gtf_gene_to_pos(annotation, extend_upstream=2000)
     # Dict of chrom (without chr prefix) to intervaltree
     gene_intervaldict = sc_data_loaders.gene_pos_dict_to_range(gene_to_pos)
 
@@ -132,7 +199,7 @@ def gene_activity_matrix_from_adata(
     """
     Create a gene activity matrix using h5ad input
     """
-    gene_to_pos = sc_data_loaders.read_gtf_gene_to_pos(annotation, extend_upstream=2000)
+    gene_to_pos = utils.read_gtf_gene_to_pos(annotation, extend_upstream=2000)
     genes = list(gene_to_pos.keys())
     gene_to_idx = {g: i for i, g in enumerate(genes)}
     # Dict of chrom (without chr prefix) to intervaltree
@@ -211,16 +278,14 @@ def archr_gene_activity_matrix_from_adata(
     Some other notes:
     - By default, ArchR appears to be doing distance calculations based on the entire gene body, which we do
     """
-    gene_to_pos = sc_data_loaders.read_gtf_gene_to_pos(
-        annotation, extend_upstream=gene_upstream
-    )
+    gene_to_pos = utils.read_gtf_gene_to_pos(annotation, extend_upstream=gene_upstream)
     genes = list(gene_to_pos.keys())
     # Map each gene and bin to a corresponding index in axis
     gene_to_idx = {g: i for i, g in enumerate(genes)}
     bin_to_idx = {b: i for i, b in enumerate(adata.var_names)}
 
     # Map of chrom without chr prefix to intervaltree
-    chrom_to_gene_intervals = sc_data_loaders.gene_pos_dict_to_range(gene_to_pos)
+    chrom_to_gene_intervals = utils.gene_pos_dict_to_range(gene_to_pos)
     # Create a mapping of where atac bins are, so we can easily grep for overlap later
     chrom_to_atac_intervals = collections.defaultdict(itree.IntervalTree)
     for atac_bin in adata.var_names:

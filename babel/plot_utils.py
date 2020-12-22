@@ -81,7 +81,10 @@ def preprocess_anndata(
     use_rep: str = None,
     inplace: bool = True,
 ):
-    """Preprocess the given anndata object to prepare for plotting. This occurs in place"""
+    """
+    Preprocess the given anndata object to prepare for plotting. This occurs in place
+    Performs dimensionality reduction, projection, and clustering
+    """
     assert isinstance(a, AnnData)
     if not inplace:
         raise NotImplementedError
@@ -223,11 +226,13 @@ def plot_clustering_anndata_direct_label(
     rep_str = representation_axes_label if representation_axes_label else representation
     if not swap_axes:
         ax.set(
-            xlabel=f"{rep_str.upper()}1", ylabel=f"{rep_str.upper()}2",
+            xlabel=f"{rep_str.upper()}1",
+            ylabel=f"{rep_str.upper()}2",
         )
     else:
         ax.set(
-            xlabel=f"{rep_str.upper()}2", ylabel=f"{rep_str.upper()}1",
+            xlabel=f"{rep_str.upper()}2",
+            ylabel=f"{rep_str.upper()}1",
         )
     ax.set(title=title)
     if not ax_tick:
@@ -311,6 +316,8 @@ def plot_scatter_with_r(
     subset: int = 0,
     logscale: bool = False,
     density_heatmap: bool = False,
+    density_dpi: int = 150,
+    density_logstretch: int = 1000,
     title: str = "",
     xlabel: str = "Original norm counts",
     ylabel: str = "Inferred norm counts",
@@ -343,6 +350,7 @@ def plot_scatter_with_r(
     # x and y may or may not be sparse at this point
     assert x.shape == y.shape
     if subset > 0 and subset < x.size:
+        logging.info(f"Subsetting to {subset} points")
         random.seed(1234)
         # Converts flat index to coordinates
         indices = np.unravel_index(
@@ -363,20 +371,32 @@ def plot_scatter_with_r(
     assert not np.any(np.isnan(x))
     assert not np.any(np.isnan(y))
 
-    pearson_r, pearson_p = corr_func(x, y)
-    logging.info(f"Found pearson's correlation of {pearson_r:.4f}")
+    pearson_r, pearson_p = scipy.stats.pearsonr(x, y)
+    logging.info(f"Found pearson's correlation/p of {pearson_r:.4f}/{pearson_p:.4g}")
+    spearman_corr, spearman_p = scipy.stats.spearmanr(x, y)
+    logging.info(
+        f"Found spearman's collelation/p of {spearman_corr:.4f}/{spearman_p:.4g}"
+    )
 
     if ax is None:
         fig = plt.figure(dpi=300, figsize=figsize)
         if density_heatmap:
+            # https://github.com/astrofrog/mpl-scatter-density
             ax = fig.add_subplot(1, 1, 1, projection="scatter_density")
-            norm = ImageNormalize(vmin=0, vmax=100, stretch=LogStretch(a=100000))
-            ax.scatter_density(x, y, dpi=150, norm=norm, color="tab:blue")
         else:
             ax = fig.add_subplot(1, 1, 1)
-            ax.scatter(x, y, alpha=0.2, c=color)
     else:
         fig = None
+
+    if density_heatmap:
+        norm = None
+        if density_logstretch:
+            norm = ImageNormalize(
+                vmin=0, vmax=100, stretch=LogStretch(a=density_logstretch)
+            )
+        ax.scatter_density(x, y, dpi=density_dpi, norm=norm, color="tab:blue")
+    else:
+        ax.scatter(x, y, alpha=0.2, c=color)
 
     if one_to_one:
         unit = np.linspace(*ax.get_xlim())
@@ -385,7 +405,7 @@ def plot_scatter_with_r(
     ax.set(
         xlabel=xlabel + (" (log)" if logscale else ""),
         ylabel=ylabel + (" (log)" if logscale else ""),
-        title=(title + f" ($\\rho={pearson_r:.2f}$)").strip(),
+        title=(title + f" ($r={pearson_r:.2f}$)").strip(),
     )
     if xlim:
         ax.set(xlim=xlim)
@@ -474,7 +494,8 @@ def plot_expression_comparison_hist(
         ax.annotate(f"p={pval:.4e}", xy=(0.05, 0.9), xycoords="axes fraction")
     ax.legend()
     ax.set(
-        xlabel="RNA Expression", title=f"Expression of {gene}, split by {split_by}",
+        xlabel="RNA Expression",
+        title=f"Expression of {gene}, split by {split_by}",
     )
     return fig
 
@@ -632,7 +653,10 @@ def plot_var_vs_explained_var(
             var_sub = per_gene_variance[genes]
             explained_sub = explained_var[genes]
             ax.scatter(
-                var_sub, explained_sub, alpha=0.8, label=key.strip() + f" (n={l})",
+                var_sub,
+                explained_sub,
+                alpha=0.8,
+                label=key.strip() + f" (n={l})",
             )
             if label_outliers:
                 label_if_outlier(var_sub, explained_sub, ax=ax)
@@ -795,11 +819,17 @@ def plot_latent_difference(
 
     fig, (ax1, ax2, ax3) = plt.subplots(dpi=300, ncols=3, figsize=(15, 4))
     ax1.hist(latent1, bins=bins, alpha=0.75)
-    ax1.set(title="Latent 1",)
+    ax1.set(
+        title="Latent 1",
+    )
     ax2.hist(latent2, bins=bins, alpha=0.75)
-    ax2.set(title="Latent 2",)
+    ax2.set(
+        title="Latent 2",
+    )
     ax3.hist(delta, bins=bins_symmetric, alpha=0.75)
-    ax3.set(title="Difference in encoded representation",)
+    ax3.set(
+        title="Difference in encoded representation",
+    )
 
     if fname:
         fig.savefig(fname, dpi=SAVEFIG_DPI, bbox_inches="tight")
@@ -818,7 +848,9 @@ def plot_heatmap(adata: AnnData, features, groupby=None):
             logging.warn(f"Feature not found: {ft}")
 
     sc.pl.heatmap(
-        adata=adata, var_names=valid_features, groupby=groupby,
+        adata=adata,
+        var_names=valid_features,
+        groupby=groupby,
     )
 
 
@@ -835,6 +867,7 @@ def plot_auroc(
     preds = utils.ensure_arr(preds).flatten()
     fpr, tpr, _thresholds = metrics.roc_curve(truth, preds)
     auc = metrics.auc(fpr, tpr)
+    logging.info(f"Found AUROC of {auc:.4f}")
 
     fig, ax = plt.subplots(dpi=300, figsize=(7, 5))
     ax.plot(fpr, tpr)
@@ -851,7 +884,10 @@ def plot_auroc(
 
 
 def plot_auprc(
-    truth, preds, title_prefix: str = "Precision recall curve", fname: str = "",
+    truth,
+    preds,
+    title_prefix: str = "Precision recall curve",
+    fname: str = "",
 ):
     """Plot AUPRC"""
     truth = utils.ensure_arr(truth).flatten()
@@ -859,6 +895,7 @@ def plot_auprc(
 
     precision, recall, _thresholds = metrics.precision_recall_curve(truth, preds)
     average_precision = metrics.average_precision_score(truth, preds)
+    logging.info(f"Found AUPRC of {average_precision:.4f}")
 
     fig, ax = plt.subplots(dpi=SAVEFIG_DPI, figsize=(7, 5))
     ax.plot(recall, precision)

@@ -15,9 +15,12 @@ import json
 
 import numpy as np
 import pandas as pd
+from sklearn import linear_model
 from scipy import sparse
 import scanpy as sc
 from anndata import AnnData
+
+import rulefit
 
 import torch
 import torch.nn as nn
@@ -35,7 +38,7 @@ from captum.attr import (
 
 import tqdm
 
-from utils import get_device, isnotebook
+from utils import get_device, isnotebook, ensure_arr, is_numeric
 import metrics
 
 DEVICE = get_device()
@@ -171,6 +174,7 @@ def annotate_clusters_to_celltypes(
             if np.max(per_celltype_match_scores) > 0
             else "Unmatched"
         )
+        logging.info(f"Mapping index {idx} -> {idx_to_celltype[idx]}")
 
     logging.info(f"Saving annotated celltypes to {groupby}_celltypes")
     key_to_add = f"{groupby}_celltypes"
@@ -187,25 +191,53 @@ def annotate_clusters_to_celltypes(
 
 
 def reformat_marker_genes_to_dict(
-    adata: AnnData, split_by: str = "leiden", padj_cutoff: float = 0.05,
+    adata: AnnData,
+    split_by: str = "leiden",
+    padj_cutoff: float = 0.05,
+    score_cutoff: float = 0.35,
+    top_n: int = 0,
 ) -> Dict[str, List[str]]:
     """
     Take the (somewhat convoluted) data structure used to store marker genes
     and store as a plain dictionary, excluding pvals that exceed cutoff
     """
-    cluster_names = sorted(list(set((adata.obs[split_by]))))
-    # print(len(cluster_names))
+    # https://stackoverflow.com/questions/8530670/get-recarray-attributes-columns-python
     marker_dict = adata.uns[f"rank_genes_{split_by}"]
-    d = {c: [] for c in cluster_names}
+    d = collections.defaultdict(list)
     # Top level if array is for each of the N marker genes
-    for _i, (level_list, level_pvals) in enumerate(
-        zip(marker_dict["names"], marker_dict["pvals_adj"])
-    ):
-        assert len(level_list) == len(d) == len(level_pvals)
-        for group_id, gene, pval in zip(cluster_names, level_list, level_pvals):
-            if pval < padj_cutoff:
-                d[group_id].append(gene)
-    return d
+    using_scores = False
+    if "pvals_adj" in marker_dict:
+        for _i, (level_list, level_pvals) in enumerate(
+            zip(marker_dict["names"], marker_dict["pvals_adj"])
+        ):
+            cluster_names = level_pvals.dtype.names
+            assert len(level_list) == len(level_pvals) == len(cluster_names)
+            assert len(level_list) == len(d) == len(level_pvals)
+            for group_id, gene, pval in zip(cluster_names, level_list, level_pvals):
+                if pval < padj_cutoff:
+                    d[group_id].append((pval, gene))
+    else:
+        logging.warn("p-values not found in marker gene struct")
+        using_scores = True
+        for _i, (level_list, level_scores) in enumerate(
+            zip(marker_dict["names"], marker_dict["scores"])
+        ):
+            cluster_names = level_scores.dtype.names
+            assert len(level_list) == len(level_scores) == len(cluster_names)
+            for group_id, gene, score in zip(cluster_names, level_list, level_scores):
+                if score >= score_cutoff:
+                    d[group_id].append((score, gene))
+    retval = {}
+    if top_n:
+        for k, v in d.items():
+            # Sort by default is small -> big
+            v_sorted = sorted(v)
+            if using_scores:  # Reverse to big -> small
+                v_sorted = v_sorted[::-1]
+            retval[k] = [m[1] for m in v_sorted[:top_n]]
+    else:
+        retval = {k: [m[1] for m in v] for k, v in d.items()}
+    return retval
 
 
 def split_dataset_by_pred(
@@ -423,6 +455,73 @@ def z_score_mat(
     if isinstance(retval, np.matrix) or not isinstance(retval, np.ndarray):
         retval = np.squeeze(np.asarray(retval))
     return retval
+
+
+def reformat_rules(rules: Iterable[str], orig_features: Iterable[str]) -> List[str]:
+    """Reformat so that something like 'feature_4' becomes readable"""
+    retval = []
+    for r in rules:
+        tokens = r.split(" ")
+        for i, t in enumerate(tokens):
+            if t.startswith("feature_"):
+                ft_id = int(t.strip("feature_"))
+                tokens[i] = orig_features[ft_id]
+        retval.append(" ".join(tokens))
+    return retval
+
+
+def involved_features_from_rules(rules: Iterable[str]) -> Set[str]:
+    """Extract the features involved in the rules"""
+    known_tokens = set(["<=", "&", ">"])
+    retval = set()
+    for r in rules:
+        tokens = r.split(" ")
+        for t in tokens:
+            if t in known_tokens or is_numeric(t):
+                continue
+            retval.add(t)
+    return retval
+
+
+def lr_atac_to_rna(
+    gene,
+    rna_adata: AnnData,
+    atac_adata: AnnData,
+    alpha: float = 0.05,
+    use_rulefit: bool = False,
+) -> Union[pd.DataFrame, List[str]]:
+    """
+    Performs a linear regression to predict the gene from ATAC bins and
+    returns the features with nonzero coefficients
+    """
+
+    y_vec = rna_adata.obs_vector(gene)
+    gene_chrom = rna_adata.var.loc[gene]["chrom"]
+    atac_chrom_subset = atac_adata[:, atac_adata.var["chrom"] == gene_chrom]
+
+    # L1 regularized
+    if use_rulefit:
+        model = rulefit.RuleFit(n_jobs=-1)
+    else:
+        model = linear_model.Lasso(alpha=alpha)
+    model.fit(ensure_arr(atac_chrom_subset.X), y_vec)
+    preds = model.predict(ensure_arr(atac_chrom_subset.X))
+    score = metrics.r2_score(y_vec, preds)  # truth, preds
+    logging.info(f"{gene} R^2: {score:.4f}")
+    if score <= 0:
+        return []
+    logging.info(f"{gene} Num nonzero coefs: {np.sum(model.coef_ > 0)}")
+
+    if use_rulefit:
+        raw_rules_df = model.get_rules()  # DataFrame
+        raw_rules_df["rule_readable"] = reformat_rules(
+            raw_rules_df["rule"], atac_chrom_subset.var_names
+        )
+        return raw_rules_df
+    else:
+        idx = np.argsort(model.coef_)[::-1]  # Smallest to largest before flip
+        features = [atac_chrom_subset.var_names[i] for i in idx if model.coef_[i] > 0]
+        return features
 
 
 if __name__ == "__main__":

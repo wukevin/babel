@@ -7,6 +7,17 @@ import os
 import sys
 from typing import *
 
+import utils
+
+DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
+assert os.path.isdir(DATA_DIR)
+MM9_GTF = os.path.join(DATA_DIR, "Mus_musculus.NCBIM37.67.gtf.gz")
+assert os.path.isfile(MM9_GTF)
+HG38_GTF = os.path.join(DATA_DIR, "Homo_sapiens.GRCh38.100.gtf.gz")
+assert os.path.isfile(HG38_GTF)
+HG19_GTF = os.path.join(DATA_DIR, "Homo_sapiens.GRCh37.87.gtf.gz")
+assert os.path.isfile(HG19_GTF)
+
 
 class GenomicInterval(object):
     """
@@ -118,13 +129,21 @@ class GenomicInterval(object):
             self.stop += size
 
     def difference(self, other) -> int:
-        """Return the difference between two intervals"""
+        """
+        Return the difference between two intervals
+        >>> x = GenomicInterval("chr1:100-200")
+        >>> y = GenomicInterval("chr1:250-300")
+        >>> x.difference(y)
+        -50
+        >>> y.difference(x)
+        50
+        """
         assert self.chrom == other.chrom
         if self.contains(other) or other.contains(self) or self.overlaps(other):
             return 0
         # Calculate an actual difference
         if self < other:
-            return other.start - self.stop
+            return self.stop - other.start
         else:
             return self.start - other.stop
 
@@ -154,6 +173,13 @@ def query_overlaps(query: str, intervals: List[str]) -> List[str]:
         if gi.chrom == query_gi.chrom and gi.overlaps(query_gi)
     ]
     return target_gis
+
+
+def from_gene(gene: str, reference_gtf: str = HG38_GTF) -> GenomicInterval:
+    """Construct a genomic interval from the gene"""
+    gtf_parsed = utils.read_gtf_gene_to_pos(reference_gtf)
+    interval_str = gtf_parsed[gene]
+    return GenomicInterval(interval_str)
 
 
 if __name__ == "__main__":

@@ -95,7 +95,11 @@ class DistanceProbLoss(nn.Module):
     def forward(self, x, target_z):
         z, logp = x[:2]
         d = F.pairwise_distance(
-            z, target_z, p=self.norm, eps=1e-6, keepdim=False,  # Default value
+            z,
+            target_z,
+            p=self.norm,
+            eps=1e-6,
+            keepdim=False,  # Default value
         )
         if len(d.shape) == 2:
             d = torch.mean(d, dim=1)  # Drop 1 dimension
@@ -156,13 +160,20 @@ class NegativeBinomialLoss(nn.Module):
     ):
         super(NegativeBinomialLoss, self).__init__()
         self.loss = negative_binom_loss(
-            scale_factor=scale_factor, eps=eps, mean=mean, debug=True,
+            scale_factor=scale_factor,
+            eps=eps,
+            mean=mean,
+            debug=True,
         )
         self.l1_lambda = l1_lambda
 
     def forward(self, preds, target):
         preds, theta = preds[:2]
-        l = self.loss(preds=preds, theta=theta, truth=target,)
+        l = self.loss(
+            preds=preds,
+            theta=theta,
+            truth=target,
+        )
         encoded = preds[:-1]
         l += self.l1_lambda * torch.abs(encoded).sum()
         return l
@@ -197,7 +208,12 @@ class ZeroInflatedNegativeBinomialLoss(nn.Module):
 
     def forward(self, preds, target):
         preds, theta, pi = preds[:3]
-        l = self.loss(preds=preds, theta_disp=theta, pi_dropout=pi, truth=target,)
+        l = self.loss(
+            preds=preds,
+            theta_disp=theta,
+            pi_dropout=pi,
+            truth=target,
+        )
         encoded = preds[:-1]
         l += self.l1_lambda * torch.abs(encoded).sum()
         return l
@@ -239,7 +255,10 @@ class PairedLoss(nn.Module):
         self.link = link_strength
         self.link_f = link_func
 
-        self.warmup = layers.SigmoidWarmup(midpoint=1000, maximum=link_strength,)
+        self.warmup = layers.SigmoidWarmup(
+            midpoint=1000,
+            maximum=link_strength,
+        )
 
     def forward(self, preds, target):
         """Unpack and feed to each loss, averaging at end"""
@@ -291,11 +310,15 @@ class PairedLossInvertible(nn.Module):
         #     maximum=link_strength,
         # )
         self.link_warmup = layers.DelayedLinearWarmup(
-            delay=1000, inc=5e-3, t_max=link_strength,
+            delay=1000,
+            inc=5e-3,
+            t_max=link_strength,
         )
 
         self.inv_warmup = layers.DelayedLinearWarmup(
-            delay=2000, inc=5e-3, t_max=inv_strength,
+            delay=2000,
+            inc=5e-3,
+            t_max=inv_strength,
         )
 
     def forward(self, preds, target):
@@ -351,7 +374,8 @@ class QuadLoss(PairedLoss):
 
         if link_warmup_delay:
             self.warmup = layers.SigmoidWarmup(
-                midpoint=link_warmup_delay, maximum=link_strength,
+                midpoint=link_warmup_delay,
+                maximum=link_strength,
             )
             # self.warmup = layers.DelayedLinearWarmup(
             #     delay=warmup_delay,
@@ -362,7 +386,8 @@ class QuadLoss(PairedLoss):
             self.warmup = layers.NullWarmup(t_max=link_strength)
         if cross_warmup_delay:
             self.cross_warmup = layers.SigmoidWarmup(
-                midpoint=cross_warmup_delay, maximum=cross_weight,
+                midpoint=cross_warmup_delay,
+                maximum=cross_weight,
             )
         else:
             self.cross_warmup = layers.NullWarmup(t_max=cross_weight)
@@ -395,7 +420,6 @@ class QuadLoss(PairedLoss):
             detensor = lambda x: x.detach().cpu().numpy().item()
             self.history.append([detensor(l) for l in (loss11, loss21, loss12, loss22)])
 
-        # loss = loss11 + loss21 + self.loss2_weight * (loss12 + loss22)
         loss = loss11 + self.loss2_weight * loss22
         loss += next(self.cross_warmup) * (loss21 + self.loss2_weight * loss12)
 

@@ -21,6 +21,16 @@ from anndata import AnnData
 
 import torch
 
+import intervaltree as itree
+import sortedcontainers
+
+DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
+assert os.path.isdir(DATA_DIR)
+HG38_GTF = os.path.join(DATA_DIR, "Homo_sapiens.GRCh38.100.gtf.gz")
+assert os.path.isfile(HG38_GTF)
+HG19_GTF = os.path.join(DATA_DIR, "Homo_sapiens.GRCh37.87.gtf.gz")
+assert os.path.isfile(HG19_GTF)
+
 
 def ensure_arr(x) -> np.ndarray:
     """Return x as a np.array"""
@@ -34,6 +44,24 @@ def ensure_arr(x) -> np.ndarray:
         return x.values
     else:
         raise TypeError(f"Unrecognized type: {type(x)}")
+
+
+def is_integral_val(x) -> bool:
+    """
+    Check if value(s) can be cast as integer without losing precision
+    >>> is_integral_val(np.array([1., 2., 3.]))
+    True
+    >>> is_integral_val(np.array([1., 2., 3.5]))
+    False
+    """
+    if isinstance(x, (np.ndarray, scipy.sparse.csr_matrix)):
+        x_int = x.astype(int)
+    else:
+        x_int = int(x)
+    residuals = x - x_int
+    if isinstance(residuals, scipy.sparse.csr_matrix):
+        residuals = residuals[residuals.nonzero()]
+    return np.all(np.isclose(residuals, 0))
 
 
 def get_file_extension_no_gz(fname: str) -> str:
@@ -171,6 +199,211 @@ def read_delimited_file(
     return retval
 
 
+@functools.lru_cache(maxsize=2, typed=True)
+def read_gtf_gene_to_pos(
+    fname: str = HG38_GTF,
+    acceptable_types: List[str] = None,
+    addtl_attr_filters: dict = None,
+    extend_upstream: int = 0,
+    extend_downstream: int = 0,
+) -> Dict[str, Tuple[str, int, int]]:
+    """
+    Given a gtf file, read it in and return as a ordered dictionary mapping genes to genomic ranges
+    Ordering is done by chromosome then by position
+    """
+    # https://uswest.ensembl.org/info/website/upload/gff.html
+    gene_to_positions = collections.defaultdict(list)
+    gene_to_chroms = collections.defaultdict(set)
+
+    opener = gzip.open if fname.endswith(".gz") else open
+    with opener(fname) as source:
+        for line in source:
+            if line.startswith(b"#"):
+                continue
+            line = line.decode()
+            (
+                chrom,
+                entry_type,
+                entry_class,
+                start,
+                end,
+                score,
+                strand,
+                frame,
+                attrs,
+            ) = line.strip().split("\t")
+            assert strand in ("+", "-")
+            if acceptable_types and entry_type not in acceptable_types:
+                continue
+            attr_dict = dict(
+                [t.strip().split(" ", 1) for t in attrs.strip().split(";") if t]
+            )
+            if addtl_attr_filters:
+                tripped_attr_filter = False
+                for k, v in addtl_attr_filters.items():
+                    if k in attr_dict:
+                        if isinstance(v, str):
+                            if v != attr_dict[k].strip('"'):
+                                tripped_attr_filter = True
+                                break
+                        else:
+                            raise NotImplementedError
+                if tripped_attr_filter:
+                    continue
+            gene = attr_dict["gene_name"].strip('"')
+            start = int(start)
+            end = int(end)
+            assert (
+                start <= end
+            ), f"Start {start} is not less than end {end} for {gene} with strand {strand}"
+            if extend_upstream:
+                if strand == "+":
+                    start -= extend_upstream
+                else:
+                    end += extend_upstream
+            if extend_downstream:
+                if strand == "+":
+                    end += extend_downstream
+                else:
+                    start -= extend_downstream
+
+            gene_to_positions[gene].append(start)
+            gene_to_positions[gene].append(end)
+            gene_to_chroms[gene].add(chrom)
+
+    slist = sortedcontainers.SortedList()
+    for gene, chroms in gene_to_chroms.items():
+        if len(chroms) != 1:
+            logging.warn(
+                f"Got multiple chromosomes for gene {gene}: {chroms}, skipping"
+            )
+            continue
+        positions = gene_to_positions[gene]
+        t = (chroms.pop(), min(positions), max(positions), gene)
+        slist.add(t)
+
+    retval = collections.OrderedDict()
+    for chrom, start, stop, gene in slist:
+        retval[gene] = (chrom, start, stop)
+    return retval
+
+
+@functools.lru_cache(maxsize=2)
+def read_gtf_gene_symbol_to_id(
+    fname: str = HG38_GTF,
+    acceptable_types: List[str] = None,
+    addtl_attr_filters: dict = None,
+) -> Dict[str, str]:
+    """Return a map from easily readable gene name to ENSG gene ID"""
+    retval = {}
+    opener = gzip.open if fname.endswith(".gz") else open
+    with opener(fname) as source:
+        for line in source:
+            if line.startswith(b"#"):
+                continue
+            line = line.decode()
+            (
+                chrom,
+                entry_type,
+                entry_class,
+                start,
+                end,
+                score,
+                strand,
+                frame,
+                attrs,
+            ) = line.strip().split("\t")
+            assert strand in ("+", "-")
+            if acceptable_types and entry_type not in acceptable_types:
+                continue
+            attr_dict = dict(
+                [t.strip().split(" ", 1) for t in attrs.strip().split(";") if t]
+            )
+            if addtl_attr_filters:
+                tripped_attr_filter = False
+                for k, v in addtl_attr_filters.items():
+                    if k in attr_dict:
+                        if isinstance(v, str):
+                            if v != attr_dict[k].strip('"'):
+                                tripped_attr_filter = True
+                                break
+                        else:
+                            raise NotImplementedError
+                if tripped_attr_filter:
+                    continue
+            gene = attr_dict["gene_name"].strip('"')
+            gene_id = attr_dict["gene_id"].strip('"')
+            retval[gene] = gene_id
+
+    return retval
+
+
+@functools.lru_cache(maxsize=8)
+def read_gtf_pos_to_features(
+    fname: str = HG38_GTF,
+    acceptable_types: Iterable[str] = [],
+    addtl_attr_filters: dict = None,
+) -> Dict[str, itree.IntervalTree]:
+    """Return an intervaltree representation of the gtf file"""
+    acceptable_types = set(acceptable_types)
+    retval = collections.defaultdict(itree.IntervalTree)
+    opener = gzip.open if fname.endswith(".gz") else open
+    with opener(fname) as source:
+        for line in source:
+            line = line.decode()
+            if line.startswith("#"):
+                continue
+            (
+                chrom,
+                entry_type,
+                entry_class,
+                start,
+                end,
+                score,
+                strand,
+                frame,
+                attrs,
+            ) = line.strip().split("\t")
+            start = int(start)
+            end = int(end)
+            if start >= end:
+                continue
+            assert strand in ("+", "-")
+            if acceptable_types and entry_type not in acceptable_types:
+                continue
+            attr_dict = dict(
+                [
+                    [u.strip('"') for u in t.strip().split(" ", 1)]
+                    for t in attrs.strip().split(";")
+                    if t
+                ]
+            )
+            if addtl_attr_filters:
+                tripped_attr_filter = False
+                for k, v in addtl_attr_filters.items():
+                    if k in attr_dict:
+                        if isinstance(v, str):
+                            if v != attr_dict[k].strip('"'):
+                                tripped_attr_filter = True
+                                break
+                        else:
+                            raise NotImplementedError
+                if tripped_attr_filter:
+                    continue
+            if not chrom.startswith("chr"):
+                chrom = "chr" + chrom
+            assert (
+                "entry_type" not in attr_dict
+                and "entry_class" not in attr_dict
+                and "entry_strand" not in attr_dict
+            )
+            attr_dict["entry_type"] = entry_type
+            attr_dict["entry_class"] = entry_class
+            attr_dict["entry_strand"] = strand
+            retval[chrom][int(start) : int(end)] = attr_dict
+    return retval
+
+
 def isnotebook() -> bool:
     """
     Returns True if the current execution environment is a jupyter notebook
@@ -248,6 +481,8 @@ def split_df_by_col(df: pd.DataFrame, col: str) -> List[pd.DataFrame]:
 
 def main():
     """On the fly testing"""
+    x = read_gtf_pos_to_features(acceptable_types=["havana"])
+    # print(x)
 
 
 if __name__ == "__main__":

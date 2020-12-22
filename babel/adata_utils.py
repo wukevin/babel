@@ -147,7 +147,8 @@ def check_marker_genes(
                 == adata.n_obs
             )
             stat, pval = scipy.stats.ranksums(
-                this_cluster_gene_vals, other_cluster_gene_vals,
+                this_cluster_gene_vals,
+                other_cluster_gene_vals,
             )
             precorrection.loc[gene, cluster_id] = pval
     s = precorrection.shape
@@ -358,9 +359,8 @@ def filter_adata_cells_and_genes(
 def normalize_count_table(
     x: AnnData,
     size_factors: bool = True,
-    top_n: int = 0,
-    normalize: bool = True,
     log_trans: bool = True,
+    normalize: bool = True,
 ) -> AnnData:
     """
     Normalize the count table using method described in DCA paper, performing operations IN PLACE
@@ -396,22 +396,13 @@ def normalize_count_table(
         x.obs["size_factors"] = 1.0
         x.uns["median_counts"] = 1.0
 
-    if top_n > 0:  # Select the top n features with the greatest variance
-        raise NotImplementedError
-        # logging.info(f"Retaining only top {top_n} features with greates variance")
-        # variances = sparse_var(x.X, axis=0)
-        # variances_idx_sort = np.argsort(variances)[
-        #     ::-1
-        # ]  # Default is low to high - this is high to low
-        # x.raw = AnnData(
-        #     x.raw.X[:, variances_idx_sort[:top_n]]
-        # )  # Hacky way to set the old values
-        # x = x[:, variances_idx_sort[:top_n]]
-
     if log_trans:  # Natural logrithm
         logging.info("Log transforming data")
         sc.pp.log1p(
-            x, chunked=True, copy=False, chunk_size=10000,
+            x,
+            chunked=True,
+            copy=False,
+            chunk_size=10000,
         )
 
     if normalize:
@@ -571,6 +562,82 @@ def reindex_adata_vars(adata: AnnData, target_vars: List[str]) -> AnnData:
     retval = AnnData(mat)
     retval.obs_names = adata.obs_names
     retval.var_names = target_vars
+    return retval
+
+
+def load_shareseq_data(tissue: str, dirname: str, mode: str = "RNA") -> AnnData:
+    """Load the SHAREseq data"""
+    assert os.path.isdir(dirname)
+    atac_fname_dict = {
+        "skin": [
+            "GSM4156597_skin.late.anagen.barcodes.txt.gz",
+            "GSM4156597_skin.late.anagen.counts.txt.gz",
+            "GSM4156597_skin.late.anagen.peaks.bed.gz",
+        ],
+        "brain": [
+            "GSM4156599_brain.barcodes.txt.gz",
+            "GSM4156599_brain.counts.txt.gz",
+            "GSM4156599_brain.peaks.bed.gz",
+        ],
+        "lung": [
+            "GSM4156600_lung.barcodes.txt.gz",
+            "GSM4156600_lung.counts.txt.gz",
+            "GSM4156600_lung.peaks.bed.gz",
+        ],
+    }
+    rna_fname_dict = {
+        "skin": "GSM4156608_skin.late.anagen.rna.counts.txt.gz",
+        "brain": "GSM4156610_brain.rna.counts.txt.gz",
+        "lung": "GSM4156611_lung.rna.counts.txt.gz",
+    }
+    assert atac_fname_dict.keys() == rna_fname_dict.keys()
+    assert tissue in atac_fname_dict.keys(), f"Unrecognized tissue: {tissue}"
+
+    atac_barcodes_fname, atac_counts_fname, atac_peaks_fname = atac_fname_dict[tissue]
+    assert "barcodes" in atac_barcodes_fname  # Check fnames are unpacked correctly
+    assert "counts" in atac_counts_fname
+    assert "peaks" in atac_peaks_fname
+    atac_cell_barcodes = pd.read_csv(
+        os.path.join(dirname, atac_barcodes_fname),
+        delimiter="\t",
+        index_col=0,
+        header=None,
+    )
+    atac_cell_barcodes.index = [i.replace(",", ".") for i in atac_cell_barcodes.index]
+
+    # Load in RNA data
+    if mode == "RNA":
+        retval = ad.read_text(os.path.join(dirname, rna_fname_dict[tissue])).T
+        # Ensure that we return a sparse matrix as the underlying datatype
+        retval.X = scipy.sparse.csr_matrix(retval.X)
+        # Fix formatting of obs names where commas were used for periods
+        retval.obs.index = [i.replace(",", ".") for i in retval.obs.index]
+        intersected_barcodes = [
+            bc for bc in retval.obs_names if bc in set(atac_cell_barcodes.index)
+        ]
+        assert intersected_barcodes, f"No common barcodes between RNA/ATAC for {tissue}"
+        logging.info(
+            f"RNA {tissue} intersects {len(intersected_barcodes)}/{len(retval.obs_names)} barcodes with ATAC"
+        )
+        retval = retval[intersected_barcodes]
+
+    elif mode == "ATAC":
+        # Load in ATAC data
+        # read_mtx automatically gives us a sparse matrix
+        retval = ad.read_mtx(os.path.join(dirname, atac_counts_fname)).T
+        # Attach metadata
+        retval.obs = atac_cell_barcodes
+        atac_peaks = pd.read_csv(
+            os.path.join(dirname, atac_peaks_fname),
+            delimiter="\t",
+            header=None,
+            names=["chrom", "start", "end"],
+        )
+        atac_peaks.index = [f"{c}:{s}-{e}" for _i, c, s, e in atac_peaks.itertuples()]
+        retval.var = atac_peaks
+    else:
+        raise ValueError("mode must be either RNA or ATAC")
+    assert isinstance(retval.X, scipy.sparse.csr_matrix)
     return retval
 
 
