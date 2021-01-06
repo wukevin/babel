@@ -367,7 +367,7 @@ def load_rna_files_for_eval(
     rna_data_kwargs["reader"] = reader_func
     try:
         sc_rna_full_dataset = sc_data_loaders.SingleCellDataset(
-            mode="all",
+            mode="skip",
             **rna_data_kwargs,
         )
         assert all(
@@ -441,7 +441,7 @@ def load_atac_files_for_eval(
 
     try:
         sc_atac_full_dataset = sc_data_loaders.SingleCellDataset(
-            mode="all",
+            mode="skip",
             predefined_split=predefined_split if predefined_split else None,
             **atac_data_kwargs,
         )

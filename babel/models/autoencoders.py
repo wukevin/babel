@@ -145,6 +145,7 @@ class Decoder(nn.Module):
         self,
         num_outputs: int,
         num_units: int = 32,
+        intermediate_dim: int = 64,
         activation=nn.PReLU,
         final_activation=None,
     ):
@@ -152,16 +153,16 @@ class Decoder(nn.Module):
         self.num_outputs = num_outputs
         self.num_units = num_units
 
-        self.decode1 = nn.Linear(self.num_units, 64)
+        self.decode1 = nn.Linear(self.num_units, intermediate_dim)
         nn.init.xavier_uniform_(self.decode1.weight)
-        self.bn1 = nn.BatchNorm1d(64)
+        self.bn1 = nn.BatchNorm1d(intermediate_dim)
         self.act1 = activation()
 
-        self.decode21 = nn.Linear(64, self.num_outputs)
+        self.decode21 = nn.Linear(intermediate_dim, self.num_outputs)
         nn.init.xavier_uniform_(self.decode21.weight)
-        self.decode22 = nn.Linear(64, self.num_outputs)
+        self.decode22 = nn.Linear(intermediate_dim, self.num_outputs)
         nn.init.xavier_uniform_(self.decode22.weight)
-        self.decode23 = nn.Linear(64, self.num_outputs)
+        self.decode23 = nn.Linear(intermediate_dim, self.num_outputs)
         nn.init.xavier_uniform_(self.decode23.weight)
 
         self.final_activations = nn.ModuleDict()
@@ -354,13 +355,21 @@ class ChromDecoder(nn.Module):
             nn.init.xavier_uniform_(layer0.weight)
             bn0 = nn.BatchNorm1d(32)
             act0 = activation()
-            l = [layer0, bn0, act0]
-
-            for _i in range(len(self.final_activations)):
-                fc_layer = nn.Linear(32, n)
-                nn.init.xavier_uniform_(fc_layer.weight)
-                l.append(fc_layer)
-            self.final_decoders.append(nn.ModuleList(l))
+            # l = [layer0, bn0, act0]
+            # for _i in range(len(self.final_activations)):
+            #     fc_layer = nn.Linear(32, n)
+            #     nn.init.xavier_uniform_(fc_layer.weight)
+            #     l.append(fc_layer)
+            # self.final_decoders.append(nn.ModuleList(l))
+            layer1 = nn.Linear(32, n)
+            nn.init.xavier_uniform_(layer1.weight)
+            layer2 = nn.Linear(32, n)
+            nn.init.xavier_uniform_(layer2.weight)
+            layer3 = nn.Linear(32, n)
+            nn.init.xavier_uniform_(layer3.weight)
+            self.final_decoders.append(
+                nn.ModuleList([layer0, bn0, act0, layer1, layer2, layer3])
+            )
 
     def forward(self, x):
         x = self.act1(self.bn1(self.decode1(x)))
@@ -370,30 +379,41 @@ class ChromDecoder(nn.Module):
         retval1, retval2, retval3 = [], [], []
         for chunk, processors in zip(x_chunked, self.final_decoders):
             # Each processor is a list of 3 different decoders
-            decode1, bn1, act1, *output_decoders = processors
+            # decode1, bn1, act1, *output_decoders = processors
+            decode1, bn1, act1, decode21, decode22, decode23 = processors
             chunk = act1(bn1(decode1(chunk)))
+            temp1 = decode21(chunk)
+            temp2 = decode22(chunk)
+            temp3 = decode23(chunk)
 
             if "act1" in self.final_activations.keys():
-                temp1 = output_decoders[0](chunk)
+                # temp1 = output_decoders[0](chunk)
                 temp1 = self.final_activations["act1"](temp1)
-                retval1.append(temp1)
+                # retval1.append(temp1)
             if "act2" in self.final_activations.keys():
-                temp2 = output_decoders[1](chunk)
+                # temp2 = output_decoders[1](chunk)
                 temp2 = self.final_activations["act2"](temp2)
-                retval2.append(temp2)
+                # retval2.append(temp2)
             if "act3" in self.final_activations.keys():
-                temp3 = output_decoders[2](chunk)
+                # temp3 = output_decoders[2](chunk)
                 temp3 = self.final_activations["act3"](temp3)
-                retval3.append(temp3)
+                # retval3.append(temp3)
+            retval1.append(temp1)
+            retval2.append(temp2)
+            retval3.append(temp3)
+        retval1 = torch.cat(retval1, dim=1)
+        retval2 = torch.cat(retval2, dim=1)
+        retval3 = torch.cat(retval3, dim=1)
+        return retval1, retval2, retval3
 
-        retval = []
-        if retval1:
-            retval.append(torch.cat(retval1, dim=1))
-        if retval2:
-            retval.append(torch.cat(retval2, dim=1))
-        if retval3:
-            retval.append(torch.cat(retval3, dim=1))
-        return tuple(retval)
+        # retval = []
+        # if retval1:
+        #     retval.append(torch.cat(retval1, dim=1))
+        # if retval2:
+        #     retval.append(torch.cat(retval2, dim=1))
+        # if retval3:
+        #     retval.append(torch.cat(retval3, dim=1))
+        # return tuple(retval)
 
 
 class AutoEncoder(nn.Module):

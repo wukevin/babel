@@ -20,7 +20,7 @@ import torch
 import skorch
 
 SRC_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "babel",
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "babel"
 )
 assert os.path.isdir(SRC_DIR)
 sys.path.append(SRC_DIR)
@@ -97,12 +97,12 @@ def main():
     if "y" in args.normalize:
         logging.info("Normalizing y inferred input")
         preds = adata_utils.normalize_count_table(
-            preds, size_factors=True, top_n=0, normalize=False, log_trans=False,
+            preds, size_factors=True, normalize=False, log_trans=False
         )
     if "x" in args.normalize:
         logging.info("Normalizing x inferred input")
         truth = adata_utils.normalize_count_table(
-            truth, size_factors=True, top_n=0, normalize=False, log_trans=False,
+            truth, size_factors=True, normalize=False, log_trans=False
         )
 
     truth_bulk = pd.Series(

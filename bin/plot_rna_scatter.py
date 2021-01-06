@@ -74,7 +74,9 @@ def build_parser():
     )
     parser.add_argument("x_rna", type=str, help="X axis RNA data")
     parser.add_argument("y_rna", type=str, help="Y axis RNA data")
-    parser.add_argument("outfname", type=str, help="Filename to save plot")
+    parser.add_argument(
+        "--outfname", type=str, default="", required=False, help="Filename to save plot"
+    )
     parser.add_argument(
         "--subset", "-s", type=int, default=100000, help="Subset amount (0 to disable)"
     )
@@ -194,7 +196,6 @@ def main():
         ylabel=args.ylabel,
         figsize=args.figsize,
     )
-    fig.savefig(args.outfname, bbox_inches="tight")
 
 
 if __name__ == "__main__":

@@ -11,6 +11,7 @@ import functools
 import itertools
 import collections
 from typing import *
+import json
 
 import numpy as np
 import pandas as pd
@@ -42,6 +43,7 @@ import sc_data_loaders
 import autoencoders
 import loss_functions
 import model_utils
+from protein_utils import LOSS_DICT, OPTIM_DICT, ACT_DICT
 import utils
 
 from train_model import plot_loss_history
@@ -137,10 +139,38 @@ def build_parser():
         help="Output directory for model, defaults to current dir",
     )
     parser.add_argument(
+        "--clusterres",
+        type=float,
+        default=1.5,
+        help="Cluster resolution for train/valid/test splits",
+    )
+    parser.add_argument(
+        "--validcluster", type=int, default=0, help="Cluster ID to use as valid cluster"
+    )
+    parser.add_argument(
+        "--testcluster", type=int, default=1, help="Cluster ID to use as test cluster"
+    )
+    parser.add_argument(
         "--preprocessonly",
         action="store_true",
         help="Preprocess data only, do not train model",
     )
+    parser.add_argument(
+        "--act",
+        type=str,
+        choices=ACT_DICT.keys(),
+        default="prelu",
+        help="Activation function",
+    )
+    parser.add_argument(
+        "--loss", type=str, choices=LOSS_DICT.keys(), default="L1", help="Loss"
+    )
+    parser.add_argument(
+        "--optim", type=str, choices=OPTIM_DICT.keys(), default="adam", help="Optimizer"
+    )
+    parser.add_argument("--interdim", type=int, default=64, help="Intermediate dim")
+    parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
+    parser.add_argument("--bs", type=int, default=512, help="Batch size")
     parser.add_argument(
         "--epochs", type=int, default=600, help="Maximum number of epochs to train"
     )
@@ -154,7 +184,7 @@ def build_parser():
 
 
 def main():
-    """"""
+    """Train a protein predictor"""
     parser = build_parser()
     args = parser.parse_args()
 
@@ -171,6 +201,8 @@ def main():
     # Log parameters
     for arg in vars(args):
         logging.info(f"Parameter {arg}: {getattr(args, arg)}")
+    with open(os.path.join(args.outdir, "params.json"), "w") as sink:
+        json.dump(vars(args), sink, indent=4)
 
     # Load the model
     pretrained_net = model_utils.load_model(args.encoder, device=args.device)
@@ -181,17 +213,26 @@ def main():
 
     # Read in the RNA
     rna_data_kwargs = copy.copy(sc_data_loaders.TENX_PBMC_RNA_DATA_KWARGS)
+    rna_data_kwargs["cluster_res"] = args.clusterres
     rna_data_kwargs["fname"] = args.rnaCounts
     rna_data_kwargs["reader"] = lambda x: load_rna_files(
         x, args.encoder, transpose=not args.notrans
     )
 
     # Construct data folds
+    full_sc_rna_dataset = sc_data_loaders.SingleCellDataset(
+        valid_cluster_id=args.validcluster,
+        test_cluster_id=args.testcluster,
+        **rna_data_kwargs,
+    )
+    full_sc_rna_dataset.data_raw.write_h5ad(os.path.join(args.outdir, "full_rna.h5ad"))
+
     train_valid_test_dsets = []
     for mode in ["all", "train", "valid", "test"]:
-        # for mode in ["test"]:
         logging.info(f"Constructing {mode} dataset")
-        sc_rna_dataset = sc_data_loaders.SingleCellDataset(mode=mode, **rna_data_kwargs)
+        sc_rna_dataset = sc_data_loaders.SingleCellDatasetSplit(
+            full_sc_rna_dataset, split=mode
+        )
         sc_rna_dataset.data_raw.write_h5ad(
             os.path.join(args.outdir, f"{mode}_rna.h5ad")
         )  # Write RNA input
@@ -200,19 +241,20 @@ def main():
         )
         # RNA and fake ATAC
         sc_dual_dataset = sc_data_loaders.PairedDataset(
-            sc_rna_dataset, sc_atac_dummy_dataset, flat_mode=True,
+            sc_rna_dataset,
+            sc_atac_dummy_dataset,
+            flat_mode=True,
         )
         # encoded(RNA) as "x" and RNA + fake ATAC as "y"
         sc_rna_encoded_dataset = sc_data_loaders.EncodedDataset(
             sc_dual_dataset, model=pretrained_net, input_mode="RNA"
         )
-        np.savetxt(
-            os.path.join(args.outdir, f"{mode}_encoded.txt.gz"),
-            sc_rna_encoded_dataset.encoded,
-        )  # Write encoded
+        sc_rna_encoded_dataset.encoded.write_h5ad(
+            os.path.join(args.outdir, f"{mode}_encoded.h5ad")
+        )
         sc_protein_dataset = sc_data_loaders.SingleCellProteinDataset(
             args.proteinCounts,
-            obs_names=sc_rna_dataset.data_raw.obs_names,
+            obs_names=sc_rna_dataset.obs_names,
             transpose=not args.notrans,
         )
         sc_protein_dataset.data_raw.write_h5ad(
@@ -224,6 +266,8 @@ def main():
         )
         _temp = sc_rna_protein_dataset[0]  # ensure calling works
         train_valid_test_dsets.append(sc_rna_protein_dataset)
+
+    # Unpack and do sanity checks
     _, sc_rna_prot_train, sc_rna_prot_valid, sc_rna_prot_test = train_valid_test_dsets
     x, y, z = sc_rna_prot_train[0], sc_rna_prot_valid[0], sc_rna_prot_test[0]
     assert (
@@ -247,24 +291,32 @@ def main():
     protein_decoder_skorch = skorch.NeuralNet(
         module=autoencoders.Decoder,
         module__num_units=16,
+        module__intermediate_dim=args.interdim,
         module__num_outputs=len(protein_markers),
-        module__final_activation=nn.Linear(
-            len(protein_markers), len(protein_markers), bias=True
-        ),  # Paper uses identity activation instead
-        lr=1e-3,
-        criterion=loss_functions.L1Loss,  # Other works use L1 loss
-        optimizer=torch.optim.Adam,
-        batch_size=512,
+        module__activation=ACT_DICT[args.act],
+        module__final_activation=nn.Identity(),
+        # module__final_activation=nn.Linear(
+        #     len(protein_markers), len(protein_markers), bias=True
+        # ),  # Paper uses identity activation instead
+        lr=args.lr,
+        criterion=LOSS_DICT[args.loss],  # Other works use L1 loss
+        optimizer=OPTIM_DICT[args.optim],
+        batch_size=args.bs,
         max_epochs=args.epochs,
         callbacks=[
-            skorch.callbacks.EarlyStopping(patience=25),
+            skorch.callbacks.EarlyStopping(patience=15),
             skorch.callbacks.LRScheduler(
                 policy=torch.optim.lr_scheduler.ReduceLROnPlateau,
-                **model_utils.REDUCE_LR_ON_PLATEAU_PARAMS,
+                patience=5,
+                factor=0.1,
+                min_lr=1e-6,
+                # **model_utils.REDUCE_LR_ON_PLATEAU_PARAMS,
             ),
             skorch.callbacks.GradientNormClipping(gradient_clip_value=5),
             skorch.callbacks.Checkpoint(
-                dirname=args.outdir, fn_prefix="net_", monitor="valid_loss_best",
+                dirname=args.outdir,
+                fn_prefix="net_",
+                monitor="valid_loss_best",
             ),
         ],
         train_split=skorch.helper.predefined_split(sc_rna_prot_valid),

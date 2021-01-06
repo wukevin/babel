@@ -470,7 +470,7 @@ def plot_bulk_scatter(
     ax.set(
         xlabel=xlabel + (" (log)" if logscale else ""),
         ylabel=ylabel + (" (log)" if logscale else ""),
-        title=(title + f" ($\\rho={pearson_r:.2f}$)").strip(),
+        title=(title + f" ($r={pearson_r:.2f}$)").strip(),
     )
     if fname:
         fig.savefig(fname, bbox_inches="tight")
@@ -508,6 +508,7 @@ def plot_expression_comparison_violin(
     title: str = "",
     fname: str = "",
     simplify_names: bool = True,
+    diag_labels: bool = False,
     alt_hypothesis: str = "two-sided",
     ax=None,
 ):
@@ -543,11 +544,15 @@ def plot_expression_comparison_violin(
     if simplify_names:
         vals = {simplify_name(k): np.array(v) for k, v in vals.items()}
 
-    # ax.violinplot(
-    #     vals.values(), positions=np.arange(len(vals)),
-    # )
+    vals_keys = sorted(list(vals.keys()))
+    vals_keys.remove("Other")
+    vals_keys.insert(0, "Other")
     sns.violinplot(
-        data=list(vals.values()), inner="quartile", ax=ax, width=0.9, palette="pastel"
+        data=[vals[k] for k in vals_keys],
+        inner="quartile",
+        ax=ax,
+        width=0.9,
+        palette="pastel",
     )
     if len(vals) == 2:
         stat, pval = scipy.stats.mannwhitneyu(
@@ -556,7 +561,7 @@ def plot_expression_comparison_violin(
         logging.info(f"Statistic of {stat:.4g}")
         logging.info(f"hypo {alt_hypothesis} p-value of {pval:.4g}")
     ax.set_xticks(np.arange(len(vals)))
-    ax.set_xticklabels(vals.keys())
+    ax.set_xticklabels(vals_keys, rotation=45 if diag_labels else 0)
     ax.set(title=gene if not title else title)
     if fname:
         assert fig is not None, f"Cannot provide both fname and axes"

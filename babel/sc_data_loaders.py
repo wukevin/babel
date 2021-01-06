@@ -275,9 +275,10 @@ class SingleCellDataset(Dataset):
         Binarize will turn all counts into binary 0/1 indicators before running normalization code
         If pool_genomic_interval is -1, then we pool based on proximity to gene
         """
-        assert (
-            mode == "all"
-        ), "SingleCellDataset now operates as a full dataset only. Use SingleCellDatasetSplit to define data splits"
+        assert mode in [
+            "all",
+            "skip",
+        ], "SingleCellDataset now operates as a full dataset only. Use SingleCellDatasetSplit to define data splits"
         assert y_mode in [
             "size_norm",
             "log_size_norm",
@@ -429,6 +430,7 @@ class SingleCellDataset(Dataset):
             self.data_raw.X = scipy.sparse.csr_matrix(self.data_raw.X)
 
         # Do all normalization before we split to make sure all folds get the same normalization
+        self.data_split_to_idx = {}
         if predefined_split is not None:
             logging.info("Got predefined split, ignoring mode")
             # Subset items
@@ -444,7 +446,7 @@ class SingleCellDataset(Dataset):
             ), "No intersected obs names from predefined split"
             # Carry over cluster indexing
             self.data_split_to_idx = copy.copy(predefined_split.data_split_to_idx)
-        else:
+        elif mode != "skip":
             # Create dicts mapping string to list of indices
             if self.data_split_by_cluster:
                 self.data_split_to_idx = self.__split_train_valid_test_cluster(
@@ -456,6 +458,9 @@ class SingleCellDataset(Dataset):
                 )
             else:
                 self.data_split_to_idx = self.__split_train_valid_test()
+        else:
+            logging.info("Got data split skip, skipping data split")
+        self.data_split_to_idx["all"] = np.arange(len(self.data_raw))
 
         self.size_factors = (
             torch.from_numpy(self.data_raw.obs.size_factors.values).type(
@@ -890,9 +895,10 @@ class SingleCellProteinDataset(Dataset):
             var_name_sanitization=lambda x: x.strip("_TotalSeqB"),
             feature_type="Antibody Capture",
         )
-        assert np.all(
-            utils.ensure_arr(self.raw_counts.X) >= 0
-        ), "Got negative raw counts"
+        # Protein matrices are small anyway
+        self.raw_counts.X = utils.ensure_arr(self.raw_counts.X)
+        assert np.all(self.raw_counts.X >= 0), "Got negative raw counts"
+        assert utils.is_integral_val(self.raw_counts.X), "Got non-integer counts"
 
         # Subset
         if obs_names is not None:
@@ -900,11 +906,12 @@ class SingleCellProteinDataset(Dataset):
             self.raw_counts = self.raw_counts[list(obs_names)]
         else:
             logging.info("Full protein dataset with no subsetting")
+        assert np.sum(self.raw_counts.X) > 0, "Got count matrix of all 0"
 
         # Normalize
         # Since this normalization is independently done PER CELL we don't have to
         # worry about doing this after we do subsetting
-        clr_counts = clr_transform(utils.ensure_arr(self.raw_counts.X))
+        clr_counts = clr_transform(self.raw_counts.X)
         # Use data_raw to be more similar to SingleCellDataset
         self.data_raw = AnnData(
             clr_counts,
@@ -917,7 +924,7 @@ class SingleCellProteinDataset(Dataset):
         return self.data_raw.n_obs
 
     def __getitem__(self, i: int):
-        clr_vec = utils.ensure_arr(self.data_raw.X[i]).flatten()
+        clr_vec = self.data_raw.X[i].flatten()
         clr_tensor = torch.from_numpy(clr_vec).type(torch.FloatTensor)
         return clr_tensor, clr_tensor
 
@@ -973,9 +980,7 @@ class SplicedDataset(Dataset):
         assert isinstance(
             dataset_y, Dataset
         ), f"Bad type for dataset_y: {type(dataset_y)}"
-        assert len(dataset_x) == len(
-            dataset_y
-        ), f"Paired dataset must have the same length"
+        assert len(dataset_x) == len(dataset_y), "Mismatched length"
         self.flat_mode = flat_mode
 
         self.obs_names = None
@@ -1075,22 +1080,23 @@ class EncodedDataset(Dataset):
 
     def __init__(self, sc_dataset: PairedDataset, model, input_mode: str = "RNA"):
         # Mode is the source for the encoded representation
-        self.sc_dataset = sc_dataset
         assert input_mode in ["RNA", "ATAC"], f"Unrecognized mode: {input_mode}"
         rna_encoded, atac_encoded = model.get_encoded_layer(sc_dataset)
         if input_mode == "RNA":
-            self.encoded = rna_encoded
+            encoded = rna_encoded
         else:
-            self.encoded = atac_encoded
+            encoded = atac_encoded
+        self.encoded = AnnData(encoded, obs=pd.DataFrame(index=sc_dataset.obs_names))
+        self.obs_names = sc_dataset.obs_names
 
     def __len__(self):
         return self.encoded.shape[0]
 
     def __getitem__(self, idx: int):
         """Returns the idx-th item as (encoded(x), y)"""
-        x_orig = self.sc_dataset[idx]
-        enc = self.encoded[idx]
-        return torch.from_numpy(enc).type(torch.FloatTensor), x_orig[-1]
+        enc = self.encoded.X[idx]
+        enc_tensor = torch.from_numpy(enc).type(torch.FloatTensor)
+        return enc_tensor, enc_tensor
 
 
 class SimSingleCellRnaDataset(Dataset):
@@ -1205,6 +1211,10 @@ def obs_names_from_dataset(dset: Dataset) -> Union[List[str], None]:
     """Extract obs names from a dataset, or None if this fails"""
     if isinstance(dset, DummyDataset):
         return None
+    elif isinstance(dset, (SplicedDataset, PairedDataset)):
+        return dset.obs_names
+    elif isinstance(dset, EncodedDataset):
+        return dset.obs_names
     elif isinstance(dset, SingleCellDatasetSplit):
         return list(dset.obs_names)
     elif isinstance(dset.data_raw, AnnData):
@@ -1915,6 +1925,7 @@ def clr_transform(x: np.ndarray, add_pseudocount: bool = True) -> np.ndarray:
             per_row.append(row)
         assert len(per_row) == x.shape[0]
         retval = np.stack(per_row)
+        assert retval.shape == x.shape
     else:
         raise ValueError(f"Cannot CLR transform array with {len(x.shape)} dims")
     return retval

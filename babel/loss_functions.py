@@ -111,6 +111,13 @@ class DistanceProbLoss(nn.Module):
         return torch.mean(d)
 
 
+class MSELoss(nn.MSELoss):
+    """MSE loss"""
+
+    def forward(self, x: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        return F.mse_loss(x[0], target, reduction=self.reduction)
+
+
 class MSELogLoss(nn.modules.loss._Loss):
     """
     MSE loss after applying log2

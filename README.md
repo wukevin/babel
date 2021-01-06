@@ -16,7 +16,7 @@ conda create -f environment.yml
 This will create a new environment named `babel`.
 
 ## Pre-trained model
-We provide a pre-trained BABEL model at the following [link](https://office365stanford-my.sharepoint.com/:u:/g/personal/wukevin_stanford_edu/EUbfgWco-4ZDo9dx4P00u5oBiQtKOuBFfydduWIwJbqwew?e=RnQl9q). To use this model, extract it into a folder and supply the path to `bin/predict_model.py` using the `--checkpoint` parameter (see "Making predictions on new data" section below). This model is trained on a set of peripheral blood mononuclear cells (PBMCs), colon adenocarcinoma COLO-320DM (DM) cells, colorectal adenocarcinoma COLO-320HSR (HSR) cells; as we discuss in the manuscript, BABEL performs best for cells that are related to these training cell types. Metrics such as psuedo-bulk concordance can be a litmus test for whether or not BABEL generalizes to a particular sample.
+We provide a pre-trained BABEL model at the following [link](https://office365stanford-my.sharepoint.com/:u:/g/personal/wukevin_stanford_edu/EeiPjchAkxVOrkJp109HKakB6MigU-VcxTLzwr0J8QEqrA?e=VxWF6s) (md5sum `5e2f68466a1460a36e39a45229b21b1b`). To use this model, extract it into a folder and supply the path to `bin/predict_model.py` using the `--checkpoint` parameter (see "Making predictions on new data" section below). This model is trained on a set of peripheral blood mononuclear cells (PBMCs), colon adenocarcinoma COLO-320DM (DM) cells, colorectal adenocarcinoma COLO-320HSR (HSR) cells; as we discuss in the manuscript, BABEL performs best for cells that are related to these training cell types. Metrics such as psuedo-bulk concordance can be a litmus test for whether or not BABEL generalizes to a particular sample.
 
 ## Usage
 
@@ -33,7 +33,7 @@ BABEL is trained using paired scRNA-seq/scATAC-seq measurements. An example comm
 python bin/train.py --data FILE1.h5 FILE2.h5 --outdir mymodel
 ```
 
-Note that each input `h5` file must contain **both** RNA and ATAC paired modalities. This will create a new directory `mymodel` that contains:
+Note that each input `h5` file must contain **both** RNA and ATAC paired modalities. In addition, these files should contain raw data (without preprocessing like size normalization), as these steps are performed automatically. This will create a new directory `mymodel` that contains:
 
 * `net_*` files, which contain the trained model parameters. Note that these, as well as the two txt files disussed below, are the only files that are required to run BABEL once it's been trained (see section below), so other files can be deleted/archived to save disk space.
 * `rna_genes.txt` and `atac_bins.txt` describing the genes and peaks that BABEL has learned to predict.
@@ -67,3 +67,6 @@ x = ad.read_h5ad()
 
 ### Additional commandline options
 Both scripts for training and evaluation described above have many more options designed for advanced users, exposing functionality like exposing batch size, learning rate, etc. These options can be accessed by using the `-h` commandline flag; for example: `python bin/train.py -h`.
+
+### Example downstream analyses
+Under the `jupyter` folder, we have included an example notebook that takes BABEL's PBMC ATAC to RNA predictions, and performs downstream analysis and visualization. This notebook generates BABEL visualizations shown in Figure 3 of our manuscript.

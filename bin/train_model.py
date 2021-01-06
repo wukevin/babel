@@ -257,12 +257,6 @@ def main():
         split="test",
     )
 
-    # logging.info(f"Identifying marker genes")
-    # adata_utils.find_marker_genes(sc_rna_full_dataset.data_raw, n_genes=25)
-    # marker_genes = adata_utils.flatten_marker_genes(
-    #     sc_rna_full_dataset.data_raw.uns["rank_genes_leiden"]
-    # )
-
     # ATAC
     logging.info("Aggregating ATAC clusters")
     if args.snareseq:
@@ -498,15 +492,6 @@ def main():
             fname=os.path.join(outdir_name, f"rna_rna_scatter_log.{args.ext}"),
         )
         plt.close(fig)
-        # fig = plot_utils.plot_scatter_with_r(
-        #     sc_rna_test_dataset.size_norm_counts[:, marker_genes].X.flatten(),
-        #     sc_rna_test_preds_anndata[:, marker_genes].X.flatten(),
-        #     subset=100000,
-        #     one_to_one=True,
-        #     title="RNA > RNA, marker genes",
-        #     fname=os.path.join(outdir_name, f"rna_rna_scatter_marker.{args.ext}"),
-        # )
-        # plt.close(fig)
 
         logging.info("Evaluating ATAC > ATAC")
         sc_atac_test_preds = spliced_net.translate_2_to_2(sc_dual_test_dataset)
@@ -525,13 +510,6 @@ def main():
             fname=os.path.join(outdir_name, f"atac_atac_auroc.{args.ext}"),
         )
         plt.close(fig)
-        # fig = plot_utils.plot_auprc(
-        #     utils.ensure_arr(sc_atac_test_dataset.data_raw.X).flatten(),
-        #     utils.ensure_arr(sc_atac_test_preds).flatten(),
-        #     title_prefix="ATAC > ATAC",
-        #     fname=os.path.join(outdir_name, f"atac_atac_auprc.{args.ext}"),
-        # )
-        # plt.close(fig)
 
         logging.info("Evaluating ATAC > RNA")
         sc_atac_rna_test_preds = spliced_net.translate_2_to_1(sc_dual_test_dataset)
@@ -571,87 +549,7 @@ def main():
             fname=os.path.join(outdir_name, f"rna_atac_auroc.{args.ext}"),
         )
         plt.close(fig)
-        # fig = plot_utils.plot_auprc(
-        #     sc_atac_test_dataset.data_raw.X.toarray().flatten(),
-        #     sc_rna_atac_test_preds.flatten(),
-        #     title_prefix="RNA > ATAC",
-        #     fname=os.path.join(outdir_name, f"rna_atac_auprc.{args.ext}"),
-        # )
-        # plt.close(fig)
 
-        # Evaluate latent space
-        # rna_encoded, atac_encoded = spliced_net.get_encoded_layer(sc_dual_test_dataset)
-        # fig, axes = plt.subplots(
-        #     dpi=300, ncols=4, nrows=4, sharex=True, sharey=True, figsize=(7, 4)
-        # )
-        # for i, ax_row in enumerate(axes):
-        #     for j, ax in enumerate(ax_row):
-        #         idx = i * 4 + j
-        #         _n, bins, _patches = ax.hist(
-        #             rna_encoded[:, idx], alpha=0.7, label="RNA"
-        #         )
-        #         ax.hist(atac_encoded[:, idx], alpha=0.7, bins=bins, label="ATAC")
-        #         v = np.var(
-        #             np.hstack(
-        #                 (rna_encoded[:, idx].flatten(), atac_encoded[:, idx].flatten())
-        #             )
-        #         )
-        #         ax.text(
-        #             0.9,
-        #             0.9,
-        #             f"var: {v:.3f}",
-        #             horizontalalignment="right",
-        #             verticalalignment="top",
-        #             transform=ax.transAxes,
-        #         )
-        # fig.suptitle(f"{idx + 1} dimensional latent space")
-        # fig.savefig(os.path.join(outdir_name, f"latent_dimensions.{args.ext}"))
-        # plt.close(fig)
-
-        # matched_distance = np.array(
-        #     [
-        #         scipy.spatial.distance.euclidean(i, j)
-        #         for i, j in zip(rna_encoded, atac_encoded)
-        #     ]
-        # )
-        # shuffled_distance = np.array(
-        #     [
-        #         scipy.spatial.distance.euclidean(rna_encoded[i, :], atac_encoded[j, :])
-        #         for i, j in zip(
-        #             np.random.permutation(rna_encoded.shape[0]),
-        #             np.random.permutation(atac_encoded.shape[0]),
-        #         )
-        #     ]
-        # )
-        # assert matched_distance.shape == shuffled_distance.shape
-
-        # fig, ax = plt.subplots(dpi=300)
-        # ax.hist(shuffled_distance, label="Mismatched pairs", alpha=0.7)
-        # ax.hist(matched_distance, label="Matched pairs", alpha=0.7)
-        # ax.legend()
-        # ax.set(
-        #     xlabel="Euclidean distance in latent space",
-        #     title=f"Test set latent space representations (p={scipy.stats.ttest_ind(matched_distance, shuffled_distance)[1]:.4g})",
-        # )
-        # fig.savefig(os.path.join(outdir_name, f"latent_distance.{args.ext}"))
-        # plt.close(fig)
-
-        # all_encoded = sc.AnnData(
-        #     np.vstack([rna_encoded, atac_encoded]),
-        #     obs=pd.DataFrame(
-        #         index=[l + "-rna" for l in sc_dual_test_dataset.get_obs_labels()]
-        #         + [l + "-atac" for l in sc_dual_test_dataset.get_obs_labels()]
-        #     ),
-        # )
-        # all_encoded.obs["data_platform"] = [
-        #     l.split("-")[-1] for l in all_encoded.obs_names
-        # ]
-
-        # plot_utils.preprocess_anndata(all_encoded)
-        # fig = plot_utils.plot_clustering_anndata(
-        #     all_encoded, color="data_platform"
-        # ).savefig(os.path.join(outdir_name, f"latent_clustering.{args.ext}"))
-        # plt.close(fig)
         del spliced_net
 
 

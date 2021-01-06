@@ -90,6 +90,7 @@ def load_model(
     input_dim2: int = -1,
     prefix: str = "net_",
     device: str = "cpu",
+    verbose: bool = False,
 ):
     """Load the primary model, flexible to hidden dim, for evaluation only"""
     # Load the model
@@ -157,6 +158,8 @@ def load_model(
             break
         except RuntimeError as e:
             logging.info(f"Failed to load with hidden size {hidden_dim_size}")
+            if verbose:
+                logging.info(e)
     if spliced_net is None:
         raise RuntimeError("Could not infer hidden size")
 
@@ -222,7 +225,7 @@ def skorch_grid_search(skorch_net, fixed_params: dict, search_params: dict, trai
 
 def main():
     """On the fly debugging"""
-    load_model(sys.argv[1])
+    load_model(sys.argv[1], verbose=True)
 
 
 if __name__ == "__main__":

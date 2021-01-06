@@ -60,7 +60,7 @@ def is_integral_val(x) -> bool:
         x_int = int(x)
     residuals = x - x_int
     if isinstance(residuals, scipy.sparse.csr_matrix):
-        residuals = residuals[residuals.nonzero()]
+        residuals = ensure_arr(residuals[residuals.nonzero()])
     return np.all(np.isclose(residuals, 0))
 
 

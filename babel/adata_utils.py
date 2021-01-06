@@ -402,7 +402,7 @@ def normalize_count_table(
             x,
             chunked=True,
             copy=False,
-            chunk_size=10000,
+            chunk_size=100000,
         )
 
     if normalize:

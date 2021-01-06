@@ -4,6 +4,7 @@ Script for predicting protein expression
 
 import os
 import sys
+import logging
 import argparse
 
 import numpy as np
@@ -25,48 +26,13 @@ import sc_data_loaders
 import autoencoders
 import loss_functions
 import model_utils
+import protein_utils
 import utils
 
-from evaluate_model_generalization import (
+from predict_model import (
     load_atac_files_for_eval,
     load_rna_files_for_eval,
 )
-
-
-def load_protein_accessory_model(dirname: str):
-    """Loads the protein accessory model"""
-    predicted_proteins = utils.read_delimited_file(
-        os.path.join(dirname, "protein_proteins.txt")
-    )
-    encoded_to_protein_skorch = skorch.NeuralNet(
-        module=autoencoders.Decoder,
-        module__num_units=16,
-        module__num_outputs=len(predicted_proteins),
-        module__final_activation=nn.Linear(
-            len(predicted_proteins), len(predicted_proteins), bias=True
-        ),  # Paper uses identity activation instead
-        lr=1e-3,
-        criterion=loss_functions.L1Loss,  # Other works use L1 loss
-        optimizer=torch.optim.Adam,
-        batch_size=512,
-        max_epochs=500,
-        callbacks=[
-            skorch.callbacks.EarlyStopping(patience=25),
-            skorch.callbacks.LRScheduler(
-                policy=torch.optim.lr_scheduler.ReduceLROnPlateau,
-                **model_utils.REDUCE_LR_ON_PLATEAU_PARAMS,
-            ),
-            skorch.callbacks.GradientNormClipping(gradient_clip_value=5),
-        ],
-        iterator_train__num_workers=8,
-        iterator_valid__num_workers=8,
-        device="cpu",
-    )
-    encoded_to_protein_skorch_cp = skorch.callbacks.Checkpoint(
-        dirname=dirname, fn_prefix="net_"
-    )
-    encoded_to_protein_skorch.load_params(checkpoint=encoded_to_protein_skorch_cp)
-    return encoded_to_protein_skorch
 
 
 def build_parser():
@@ -98,6 +64,16 @@ def main():
     args = parser.parse_args()
     assert args.output.endswith(".csv")
 
+    # Specify output log file
+    logger = logging.getLogger()
+    fh = logging.FileHandler(args.output + ".log")
+    fh.setLevel(logging.INFO)
+    logger.addHandler(fh)
+
+    # Log parameters
+    for arg in vars(args):
+        logging.info(f"Parameter {arg}: {getattr(args, arg)}")
+
     # Load the model
     babel = model_utils.load_model(args.babel, device=args.device)
     # Load in some related files
@@ -105,7 +81,7 @@ def main():
     atac_bins = utils.read_delimited_file(os.path.join(args.babel, "atac_bins.txt"))
 
     # Load in the protein accesory model
-    babel_prot_acc_model = load_protein_accessory_model(args.protmodel)
+    babel_prot_acc_model = protein_utils.load_protein_accessory_model(args.protmodel)
     proteins = utils.read_delimited_file(
         os.path.join(args.protmodel, "protein_proteins.txt")
     )
@@ -122,7 +98,9 @@ def main():
             shape=len(atac_bins), length=len(sc_rna_dset)
         )
         sc_dual_dataset = sc_data_loaders.PairedDataset(
-            sc_rna_dset, sc_atac_dummy_dset, flat_mode=True,
+            sc_rna_dset,
+            sc_atac_dummy_dset,
+            flat_mode=True,
         )
         sc_dual_encoded_dataset = sc_data_loaders.EncodedDataset(
             sc_dual_dataset, model=babel, input_mode="RNA"
@@ -146,8 +124,12 @@ def main():
         encoded = sc_dual_encoded_dataset.encoded
 
     # Array of preds
-    prot_preds = babel_prot_acc_model.predict(encoded)
-    prot_preds_df = pd.DataFrame(prot_preds, index=cell_barcodes, columns=proteins,)
+    prot_preds = babel_prot_acc_model.predict(encoded.X)
+    prot_preds_df = pd.DataFrame(
+        prot_preds,
+        index=cell_barcodes,
+        columns=proteins,
+    )
     prot_preds_df.to_csv(args.output)
 
 
