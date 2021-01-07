@@ -50,7 +50,6 @@ def do_evaluation_rna_from_rna(
     outdir: str,
     ext: str,
     marker_genes: List[str],
-    housekeeper_genes: List[str],
     prefix: str = "",
 ):
     """
@@ -91,7 +90,6 @@ def do_evaluation_atac_from_rna(
     outdir: str,
     ext: str,
     marker_genes: List[str],
-    housekeeper_genes: List[str],
     prefix: str = "",
 ):
     ### RNA > ATAC
@@ -131,7 +129,6 @@ def do_evaluation_atac_from_atac(
     outdir: str,
     ext: str,
     marker_genes: List[str],
-    housekeeper_genes: List[str],
     prefix: str = "",
 ):
     ### ATAC > ATAC
@@ -188,7 +185,6 @@ def do_evaluation_rna_from_atac(
     outdir: str,
     ext: str,
     marker_genes: List[str],
-    housekeeper_genes: List[str],
     prefix: str = "",
 ):
     ### ATAC > RNA
@@ -386,10 +382,7 @@ def load_rna_files_for_eval(
             shape=len(rna_genes), length=-1
         )
         marker_genes = []
-    housekeeper_genes = utils.read_delimited_file(
-        os.path.join(DATA_DIR, "housekeeper_genes.txt")
-    )
-    return sc_rna_full_dataset, rna_genes, marker_genes, housekeeper_genes
+    return sc_rna_full_dataset, rna_genes, marker_genes
 
 
 def load_atac_files_for_eval(
@@ -478,7 +471,6 @@ def main():
         sc_rna_full_dataset,
         rna_genes,
         marker_genes,
-        housekeeper_genes,
     ) = load_rna_files_for_eval(
         args.data,
         args.checkpoint[0],
@@ -578,7 +570,6 @@ def main():
                     args.outdir,
                     None if args.noplot else args.ext,
                     marker_genes,
-                    housekeeper_genes,
                     prefix=prefix,
                 )
             do_evaluation_atac_from_rna(
@@ -589,7 +580,6 @@ def main():
                 args.outdir,
                 None if args.noplot else args.ext,
                 marker_genes,
-                housekeeper_genes,
                 prefix=prefix,
             )
         if (
@@ -604,7 +594,6 @@ def main():
                 args.outdir,
                 None if args.noplot else args.ext,
                 marker_genes,
-                housekeeper_genes,
                 prefix=prefix,
             )
             if not args.transonly:
@@ -616,7 +605,6 @@ def main():
                     args.outdir,
                     None if args.noplot else args.ext,
                     marker_genes,
-                    housekeeper_genes,
                     prefix=prefix,
                 )
         del spliced_net
