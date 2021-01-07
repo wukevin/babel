@@ -27,4 +27,5 @@ dependencies:
   - conda-forge::intervaltree=3.0.*
   - conda-forge::leidenalg=0.7.0
   - anaconda::cached-property=1.5.*
+  - bioconda::ucsc-liftover
 
