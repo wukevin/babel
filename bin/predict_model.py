@@ -36,8 +36,6 @@ from models import autoencoders
 
 DATA_DIR = os.path.join(os.path.dirname(SRC_DIR), "data")
 assert os.path.isdir(DATA_DIR)
-PBMC_DATA_DIR = os.path.join(os.path.dirname(SRC_DIR), "data", "10x_PBMC")
-assert os.path.isdir(PBMC_DATA_DIR)
 
 logging.basicConfig(level=logging.INFO)
 
