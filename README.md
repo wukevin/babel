@@ -68,5 +68,5 @@ x = ad.read_h5ad()
 ### Additional commandline options
 Both scripts for training and evaluation described above have many more options designed for advanced users, exposing functionality like exposing batch size, learning rate, etc. These options can be accessed by using the `-h` commandline flag; for example: `python bin/train.py -h`.
 
-### Example downstream analyses
-Under the `jupyter` folder, we have included an example notebook that takes BABEL's PBMC ATAC to RNA predictions, and performs downstream analysis and visualization. This notebook generates BABEL visualizations shown in Figure 3 of our manuscript.
+### Example usage and downstream analyses
+Under the `jupyter` folder, we have included an example notebook that describes how to infer expression from scATAC-seq using BABEL. We then take BABEL's PBMC ATAC to RNA predictions and perform downstream analysis and visualization. This notebook generates BABEL visualizations shown in Figure 3 of our manuscript.
