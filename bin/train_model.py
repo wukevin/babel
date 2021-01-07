@@ -49,9 +49,6 @@ import utils
 import metrics
 import interpretation
 
-MODELS_SAVE_DIR = os.path.join(os.path.dirname(SRC_DIR), "models")
-assert os.path.isdir(MODELS_SAVE_DIR), f"Cannot find: {MODELS_SAVE_DIR}"
-
 logging.basicConfig(level=logging.INFO)
 
 OPTIMIZER_DICT = {
