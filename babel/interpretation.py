@@ -20,8 +20,6 @@ from scipy import sparse
 import scanpy as sc
 from anndata import AnnData
 
-import rulefit
-
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset
@@ -481,47 +479,6 @@ def involved_features_from_rules(rules: Iterable[str]) -> Set[str]:
                 continue
             retval.add(t)
     return retval
-
-
-def lr_atac_to_rna(
-    gene,
-    rna_adata: AnnData,
-    atac_adata: AnnData,
-    alpha: float = 0.05,
-    use_rulefit: bool = False,
-) -> Union[pd.DataFrame, List[str]]:
-    """
-    Performs a linear regression to predict the gene from ATAC bins and
-    returns the features with nonzero coefficients
-    """
-
-    y_vec = rna_adata.obs_vector(gene)
-    gene_chrom = rna_adata.var.loc[gene]["chrom"]
-    atac_chrom_subset = atac_adata[:, atac_adata.var["chrom"] == gene_chrom]
-
-    # L1 regularized
-    if use_rulefit:
-        model = rulefit.RuleFit(n_jobs=-1)
-    else:
-        model = linear_model.Lasso(alpha=alpha)
-    model.fit(ensure_arr(atac_chrom_subset.X), y_vec)
-    preds = model.predict(ensure_arr(atac_chrom_subset.X))
-    score = metrics.r2_score(y_vec, preds)  # truth, preds
-    logging.info(f"{gene} R^2: {score:.4f}")
-    if score <= 0:
-        return []
-    logging.info(f"{gene} Num nonzero coefs: {np.sum(model.coef_ > 0)}")
-
-    if use_rulefit:
-        raw_rules_df = model.get_rules()  # DataFrame
-        raw_rules_df["rule_readable"] = reformat_rules(
-            raw_rules_df["rule"], atac_chrom_subset.var_names
-        )
-        return raw_rules_df
-    else:
-        idx = np.argsort(model.coef_)[::-1]  # Smallest to largest before flip
-        features = [atac_chrom_subset.var_names[i] for i in idx if model.coef_[i] > 0]
-        return features
 
 
 if __name__ == "__main__":
