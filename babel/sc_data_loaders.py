@@ -49,8 +49,6 @@ DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
 assert os.path.isdir(DATA_DIR)
 SNARESEQ_DATA_DIR = os.path.join(DATA_DIR, "snareseq_GSE126074")
 assert os.path.isdir(SNARESEQ_DATA_DIR)
-TENX_PBMC_DATA_DIR = os.path.join(DATA_DIR, "10x_PBMC")
-assert os.path.isdir(TENX_PBMC_DATA_DIR)
 SC_RNA_ATAC_DIR = os.path.join(DATA_DIR, "sc_rnaseq_atacseq")
 assert os.path.isdir(SC_RNA_ATAC_DIR)
 MM9_GTF = os.path.join(DATA_DIR, "Mus_musculus.NCBIM37.67.gtf.gz")
@@ -151,19 +149,7 @@ SNARESEQ_RNA_DATA_KWARGS = {
     "cluster_res": 1.5,
 }
 
-TENX_PBMC_ATAC_BINS_FILE = os.path.join(TENX_PBMC_DATA_DIR, "pbmc_merged_atac_bins.txt")
 TENX_PBMC_ATAC_DATA_KWARGS = {
-    "fname": (
-        os.path.join(TENX_PBMC_DATA_DIR, "pbmc_rep1_filtered_feature_bc_matrix.h5"),
-        os.path.join(TENX_PBMC_DATA_DIR, "pbmc_rep2_filtered_feature_bc_matrix.h5"),
-    ),
-    "reader": functools.partial(
-        utils.sc_read_multi_files,
-        reader=lambda x: repool_atac_bins(
-            utils.sc_read_10x_h5_ft_type(x, "Peaks"),
-            utils.read_delimited_file(TENX_PBMC_ATAC_BINS_FILE),
-        ),
-    ),
     "transpose": False,
     "selfsupervise": True,  # Doesn't actually do anything
     "binarize": True,  # From SNAREseq paper methods section (SCALE also binarizes, uses either CE or MSE loss)
@@ -182,10 +168,6 @@ TENX_PBMC_ATAC_DATA_KWARGS = {
 }
 
 TENX_PBMC_RNA_DATA_KWARGS = {
-    "fname": (
-        os.path.join(TENX_PBMC_DATA_DIR, "pbmc_rep1_filtered_feature_bc_matrix.h5"),
-        os.path.join(TENX_PBMC_DATA_DIR, "pbmc_rep2_filtered_feature_bc_matrix.h5"),
-    ),
     "reader": functools.partial(
         utils.sc_read_multi_files,
         reader=lambda x: utils.sc_read_10x_h5_ft_type(x, "Gene Expression"),

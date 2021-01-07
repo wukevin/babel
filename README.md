@@ -11,7 +11,7 @@ We do not yet have a mechanism for "installing" BABEL for the time being. Curren
 After cloning the repository, the necessary software dependencies (i.e. the environment) to run BABEL can be installed using `conda`:
 
 ```bash
-conda create -f environment.yml
+conda env create -f environment.yml
 ```
 This will create a new environment named `babel`.
 
