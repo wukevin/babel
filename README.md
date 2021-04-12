@@ -2,7 +2,7 @@
 
 BABEL is a deep learning model written in Python designed to translate between mutliple single cell modalities. Currently, it is designed to translate between scATAC-seq and scRNA-seq profiles. It does so by learning encoder networks that can project these two modalities into a shared latent representation, and decoder networks that can take this representation and reconstruct expression or chromatin accessibility profiles.
 
-For more information, please see our preprint: https://doi.org/10.1101/2020.11.09.375550
+For more information, please see our manuscript: https://doi.org/10.1073/pnas.2023070118
 
 ## Installation
 
