@@ -70,7 +70,6 @@ def annotate_basic_adata_metrics(adata: AnnData) -> None:
     adata.obs["log1p_counts"] = np.log1p(adata.obs["n_counts"])
     adata.obs["n_genes"] = np.squeeze(np.asarray(((adata.X > 0).sum(1))))
 
-    var_n_counts = np.squeeze(np.asarray(adata.X.sum(0)))
     adata.var["n_counts"] = np.squeeze(np.asarray(adata.X.sum(0)))
     adata.var["log1p_counts"] = np.log1p(adata.var["n_counts"])
     adata.var["n_cells"] = np.squeeze(np.asarray((adata.X > 0).sum(0)))
