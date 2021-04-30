@@ -24,6 +24,9 @@ dependencies:
   - conda-forge::jupyter
   - bioconda::anndata=0.6.22.*
   - bioconda::scanpy=1.4.*
+  - conda-forge::multicore-tsne=0.1
+  - conda-forge::umap-learn=0.3.10
+  - conda-forge::louvain=0.6.1
   - conda-forge::intervaltree=3.0.*
   - conda-forge::leidenalg=0.7.0
   - anaconda::cached-property=1.5.*
