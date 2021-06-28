@@ -41,7 +41,9 @@ BABEL is trained using paired scRNA-seq/scATAC-seq measurements. An example comm
 python bin/train.py --data FILE1.h5 FILE2.h5 --outdir mymodel
 ```
 
-Note that each input `h5` file must contain **both** RNA and ATAC paired modalities. In addition, these files should contain raw data (without preprocessing like size normalization), as these steps are performed automatically. This will create a new directory `mymodel` that contains:
+Note that each input `h5` file must contain **both** RNA and ATAC paired modalities. In addition, these files should contain raw data (without preprocessing like size normalization), as these steps are performed automatically. For additional reference on formatting of these h5 inputs, please see the multi-omic h5 files available from 10x's website, or the h5 files included in the tarball under the "Reproducing pre-trained model" section above.
+
+This training script will create a new directory `mymodel` that contains:
 
 * `net_*` files, which contain the trained model parameters. Note that these, as well as the two txt files disussed below, are the only files that are required to run BABEL once it's been trained (see section below), so other files can be deleted/archived to save disk space.
 * `rna_genes.txt` and `atac_bins.txt` describing the genes and peaks that BABEL has learned to predict.
@@ -53,6 +55,21 @@ Note that each input `h5` file must contain **both** RNA and ATAC paired modalit
 
 This command will also generate a log file `mymodel_training.log` (outside of the output directory).
 
+#### Training on SHARE-seq/SNARE-seq
+Due to differences in file formats, the training code contains special logic for loading in these two experiments' data and training BABEL accordingly. 
+
+For SNARE-seq use the `--snareseq` flag, for example:
+
+```bash
+python ~/projects/babel/bin/train_model.py --snareseq --outdir snareseq_model
+```
+
+For SHARE-seq, use the `--shareseq` flag along with keyword arguments to specify which SHARE-seq datasets to use, for example:
+
+```bash
+python ~/projects/babel/bin/train_model.py --shareseq skin --outdir shareseq_model
+```
+
 ### Making predictions on new data
 Once trained, BABEL can be used to generate new predictions using the following example command. This assumes that `mymodel` is the directory containing the trained BABEL model, and will create an output folder `myoutput`.
 
@@ -62,7 +79,7 @@ python bin/predict_model.py --checkpoint mymodel --data data1.h5 data2.h5 --outd
 BABEL will try determine whether the input files contain ATAC or RNA (or both) input modalities, and will create its outputs in the folder `myoutput` accordingly:
 
 * Various `*.h5ad` files containing the predictions. These are named with the convention `inputMode_outputMode_adata.h5ad`. For example the file `atac_rna_adata.h5ad` contains the RNA predictions from ATAC input.
-* If given paired data, this script will also generate concordance metrics in `*.pdf` files with a similar naming convention. For example, `atac_rna_log.pdf` will contain a log-scaled scatterplot of 
+* If given paired data, this script will also generate concordance metrics in `*.pdf` files with a similar naming convention. For example, `atac_rna_log.pdf` will contain a log-scaled scatterplot comparing measured and imputed expression values per gene per cell.
 
 ## Misc.
 ### What are `h5ad` files?
