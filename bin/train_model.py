@@ -82,6 +82,11 @@ def build_parser():
         choices=["lung", "skin", "brain"],
         help="Load in the given SHAREseq datasets",
     )
+    input_group.add_argument(
+        "--lenienttenx",
+        action="store_true",
+        help="Data in 10x format, use custom data loading logic",
+    )
     parser.add_argument(
         "--linear",
         action="store_true",
@@ -229,6 +234,9 @@ def main():
                 batch_categories=args.shareseq,
             )
         rna_data_kwargs["raw_adata"] = shareseq_rna_adata
+    elif args.lenienttenx:
+        rna_data_kwargs = copy.copy(sc_data_loaders.TENX_LENIENT_RNA_DATA_KWARGS)
+        rna_data_kwargs["fname"] = args.data
     else:
         rna_data_kwargs = copy.copy(sc_data_loaders.TENX_PBMC_RNA_DATA_KWARGS)
         rna_data_kwargs["fname"] = args.data
