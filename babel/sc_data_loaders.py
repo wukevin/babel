@@ -203,7 +203,7 @@ TENX_LENIENT_RNA_DATA_KWARGS = {
     "selfsupervise": True,
     "binarize": False,
     "filt_cell_min_genes": 0,  # SNAREseq paper: minimum of 200 genes
-    "filt_cell_max_genes": 7000,  # SNAREseq paper: maximum of 2500 genes
+    "filt_cell_max_genes": 50000,  # SNAREseq paper: maximum of 2500 genes
     "normalize": True,
     "log_trans": True,
     "clip": 0.5,  # Clip the bottom and top 0.5%
