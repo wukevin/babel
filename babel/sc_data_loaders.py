@@ -189,30 +189,6 @@ TENX_PBMC_RNA_DATA_KWARGS = {
     "cluster_res": 1.5,
 }
 
-TENX_LENIENT_RNA_DATA_KWARGS = {
-    "reader": functools.partial(
-        utils.sc_read_multi_files,
-        reader=lambda x: utils.sc_read_10x_h5_ft_type(x, "Gene Expression"),
-    ),
-    "transpose": False,  # We do not transpose because the h5 is already cell x gene
-    "gtf_file": HG38_GTF,
-    "autosomes_only": True,
-    "sort_by_pos": True,
-    "split_by_chrom": True,
-    "concat_outputs": True,
-    "selfsupervise": True,
-    "binarize": False,
-    "filt_cell_min_genes": 0,  # SNAREseq paper: minimum of 200 genes
-    "filt_cell_max_genes": 50000,  # SNAREseq paper: maximum of 2500 genes
-    "normalize": True,
-    "log_trans": True,
-    "clip": 0.5,  # Clip the bottom and top 0.5%
-    "y_mode": "size_norm",  # The output that we learn to predict
-    "calc_size_factors": True,
-    "return_sf": False,
-    "cluster_res": 1.5,
-}
-
 
 @functools.lru_cache(4)
 def sc_read_mtx(fname: str, dtype: str = "float32"):
