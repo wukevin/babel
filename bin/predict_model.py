@@ -342,7 +342,7 @@ def build_parser():
 
 
 def load_rna_files_for_eval(
-    data, checkpoint: str, rna_genes_list_fname: str = "", no_filter: bool = False, len
+    data, checkpoint: str, rna_genes_list_fname: str = "", no_filter: bool = False
 ):
     """"""
     if not rna_genes_list_fname:
