@@ -333,7 +333,7 @@ def build_parser():
     parser.add_argument(
         "--skipatacsource", action="store_true", help="Skip analysis starting from ATAC"
     )
-    input_group.add_argument(
+    parser.add_argument(
         "--nofilter",
         action="store_true",
         help="Whether or not to perform filtering",

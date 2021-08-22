@@ -82,7 +82,7 @@ def build_parser():
         choices=["lung", "skin", "brain"],
         help="Load in the given SHAREseq datasets",
     )
-    input_group.add_argument(
+    parser.add_argument(
         "--nofilter",
         action="store_true",
         help="Whether or not to perform filtering",
