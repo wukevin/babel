@@ -1,8 +1,10 @@
 # BABEL
 
-BABEL is a deep learning model written in Python designed to translate between mutliple single cell modalities. Currently, it is designed to translate between scATAC-seq and scRNA-seq profiles. It does so by learning encoder networks that can project these two modalities into a shared latent representation, and decoder networks that can take this representation and reconstruct expression or chromatin accessibility profiles.
+BABEL is a deep learning model written in Python designed to translate between mutliple single cell modalities. Currently, it is designed to translate between scATAC-seq and scRNA-seq profiles, though we show proof-of-concept of BABEL integrating additional modalities like proteomics. BABEL does this by learning encoder networks that can project these modalities into a shared latent representation, and decoder networks that can take this representation and reconstruct expression or chromatin accessibility profiles.
 
-For more information, please see our manuscript: https://doi.org/10.1073/pnas.2023070118
+For more information, please see our peer-reviewed manuscript:
+
+*[Wu, Kevin E., Kathryn E. Yost, Howard Y. Chang, and James Zou. "BABEL enables cross-modality translation between multiomic profiles at single-cell resolution." Proceedings of the National Academy of Sciences 118, no. 15 (2021).](https://doi.org/10.1073/pnas.2023070118)*
 
 ## Installation
 
