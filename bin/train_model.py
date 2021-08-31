@@ -83,6 +83,11 @@ def build_parser():
         help="Load in the given SHAREseq datasets",
     )
     parser.add_argument(
+        "--nofilter",
+        action="store_true",
+        help="Whether or not to perform filtering",
+    )
+    parser.add_argument(
         "--linear",
         action="store_true",
         help="Do clustering data splitting in linear instead of log space",
@@ -232,6 +237,10 @@ def main():
     else:
         rna_data_kwargs = copy.copy(sc_data_loaders.TENX_PBMC_RNA_DATA_KWARGS)
         rna_data_kwargs["fname"] = args.data
+        if args.nofilter:
+            rna_data_kwargs = {
+                k: v for k, v in rna_data_kwargs.items() if not k.startswith("filt_")
+            }
     rna_data_kwargs["data_split_by_cluster_log"] = not args.linear
     rna_data_kwargs["data_split_by_cluster"] = args.clustermethod
 

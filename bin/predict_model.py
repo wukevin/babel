@@ -333,6 +333,11 @@ def build_parser():
     parser.add_argument(
         "--skipatacsource", action="store_true", help="Skip analysis starting from ATAC"
     )
+    parser.add_argument(
+        "--nofilter",
+        action="store_true",
+        help="Whether or not to perform filtering",
+    )
     return parser
 
 
@@ -475,6 +480,7 @@ def main():
         args.data,
         args.checkpoint[0],
         args.genes,
+        no_filter = args.nofilter
     )
 
     if hasattr(sc_rna_full_dataset, "size_norm_counts"):
