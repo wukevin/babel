@@ -64,11 +64,7 @@ def build_parser():
     )
     input_group = parser.add_mutually_exclusive_group(required=True)
     input_group.add_argument(
-        "--data",
-        "-d",
-        type=str,
-        nargs="*",
-        help="Data files to train on",
+        "--data", "-d", type=str, nargs="*", help="Data files to train on",
     )
     input_group.add_argument(
         "--snareseq",
@@ -85,7 +81,7 @@ def build_parser():
     parser.add_argument(
         "--nofilter",
         action="store_true",
-        help="Whether or not to perform filtering",
+        help="Whether or not to perform filtering (only applies with --data argument)",
     )
     parser.add_argument(
         "--linear",
@@ -164,19 +160,14 @@ def plot_loss_history(history, fname: str):
     """Create a plot of train valid loss"""
     fig, ax = plt.subplots(dpi=300)
     ax.plot(
-        np.arange(len(history)),
-        history[:, "train_loss"],
-        label="Train",
+        np.arange(len(history)), history[:, "train_loss"], label="Train",
     )
     ax.plot(
-        np.arange(len(history)),
-        history[:, "valid_loss"],
-        label="Valid",
+        np.arange(len(history)), history[:, "valid_loss"], label="Valid",
     )
     ax.legend()
     ax.set(
-        xlabel="Epoch",
-        ylabel="Loss",
+        xlabel="Epoch", ylabel="Loss",
     )
     fig.savefig(fname)
     return fig
@@ -251,16 +242,13 @@ def main():
     )
 
     sc_rna_train_dataset = sc_data_loaders.SingleCellDatasetSplit(
-        sc_rna_dataset,
-        split="train",
+        sc_rna_dataset, split="train",
     )
     sc_rna_valid_dataset = sc_data_loaders.SingleCellDatasetSplit(
-        sc_rna_dataset,
-        split="valid",
+        sc_rna_dataset, split="valid",
     )
     sc_rna_test_dataset = sc_data_loaders.SingleCellDatasetSplit(
-        sc_rna_dataset,
-        split="test",
+        sc_rna_dataset, split="test",
     )
 
     # ATAC
@@ -322,8 +310,7 @@ def main():
         atac_data_kwargs["reader"] = functools.partial(
             utils.sc_read_multi_files,
             reader=lambda x: sc_data_loaders.repool_atac_bins(
-                utils.sc_read_10x_h5_ft_type(x, "Peaks"),
-                atac_bins,
+                utils.sc_read_10x_h5_ft_type(x, "Peaks"), atac_bins,
             ),
         )
     atac_data_kwargs["cluster_res"] = 0  # Do not bother clustering ATAC data
@@ -332,37 +319,26 @@ def main():
         predefined_split=sc_rna_dataset, **atac_data_kwargs
     )
     sc_atac_train_dataset = sc_data_loaders.SingleCellDatasetSplit(
-        sc_atac_dataset,
-        split="train",
+        sc_atac_dataset, split="train",
     )
     sc_atac_valid_dataset = sc_data_loaders.SingleCellDatasetSplit(
-        sc_atac_dataset,
-        split="valid",
+        sc_atac_dataset, split="valid",
     )
     sc_atac_test_dataset = sc_data_loaders.SingleCellDatasetSplit(
-        sc_atac_dataset,
-        split="test",
+        sc_atac_dataset, split="test",
     )
 
     sc_dual_train_dataset = sc_data_loaders.PairedDataset(
-        sc_rna_train_dataset,
-        sc_atac_train_dataset,
-        flat_mode=True,
+        sc_rna_train_dataset, sc_atac_train_dataset, flat_mode=True,
     )
     sc_dual_valid_dataset = sc_data_loaders.PairedDataset(
-        sc_rna_valid_dataset,
-        sc_atac_valid_dataset,
-        flat_mode=True,
+        sc_rna_valid_dataset, sc_atac_valid_dataset, flat_mode=True,
     )
     sc_dual_test_dataset = sc_data_loaders.PairedDataset(
-        sc_rna_test_dataset,
-        sc_atac_test_dataset,
-        flat_mode=True,
+        sc_rna_test_dataset, sc_atac_test_dataset, flat_mode=True,
     )
     sc_dual_full_dataset = sc_data_loaders.PairedDataset(
-        sc_rna_dataset,
-        sc_atac_dataset,
-        flat_mode=True,
+        sc_rna_dataset, sc_atac_dataset, flat_mode=True,
     )
 
     # Model
@@ -456,9 +432,7 @@ def main():
                 ),
                 skorch.callbacks.GradientNormClipping(gradient_clip_value=5),
                 skorch.callbacks.Checkpoint(
-                    dirname=outdir_name,
-                    fn_prefix="net_",
-                    monitor="valid_loss_best",
+                    dirname=outdir_name, fn_prefix="net_", monitor="valid_loss_best",
                 ),
             ],
             train_split=skorch.helper.predefined_split(sc_dual_valid_dataset),

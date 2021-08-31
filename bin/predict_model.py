@@ -21,8 +21,7 @@ import torch
 import skorch
 
 SRC_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "babel",
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "babel",
 )
 assert os.path.isdir(SRC_DIR)
 sys.path.append(SRC_DIR)
@@ -60,8 +59,7 @@ def do_evaluation_rna_from_rna(
     logging.info("Inferring RNA from RNA...")
     sc_rna_full_preds = spliced_net.translate_1_to_1(sc_dual_full_dataset)
     sc_rna_full_preds_anndata = sc.AnnData(
-        sc_rna_full_preds,
-        obs=sc_dual_full_dataset.dataset_x.data_raw.obs,
+        sc_rna_full_preds, obs=sc_dual_full_dataset.dataset_x.data_raw.obs,
     )
     sc_rna_full_preds_anndata.var_names = gene_names
 
@@ -275,8 +273,7 @@ def infer_reader(fname: str, mode: str = "atac") -> Callable:
 
 def build_parser():
     parser = argparse.ArgumentParser(
-        usage=__doc__,
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        usage=__doc__, formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
         "--checkpoint",
@@ -334,9 +331,7 @@ def build_parser():
         "--skipatacsource", action="store_true", help="Skip analysis starting from ATAC"
     )
     parser.add_argument(
-        "--nofilter",
-        action="store_true",
-        help="Whether or not to perform filtering",
+        "--nofilter", action="store_true", help="Whether or not to perform filtering",
     )
     return parser
 
@@ -366,8 +361,7 @@ def load_rna_files_for_eval(
     rna_data_kwargs["reader"] = reader_func
     try:
         sc_rna_full_dataset = sc_data_loaders.SingleCellDataset(
-            mode="skip",
-            **rna_data_kwargs,
+            mode="skip", **rna_data_kwargs,
         )
         assert all(
             [x == y for x, y in zip(rna_genes, sc_rna_full_dataset.data_raw.var_names)]
@@ -418,8 +412,7 @@ def load_atac_files_for_eval(
         atac_data_kwargs["reader"] = functools.partial(
             utils.sc_read_multi_files,
             reader=lambda x: sc_data_loaders.repool_atac_bins(
-                infer_reader(data[0], mode="atac")(x),
-                atac_bins,
+                infer_reader(data[0], mode="atac")(x), atac_bins,
             ),
         )
     else:  # Requires liftover
@@ -472,15 +465,8 @@ def main():
     fh.setLevel(logging.INFO)
     logger.addHandler(fh)
 
-    (
-        sc_rna_full_dataset,
-        rna_genes,
-        marker_genes,
-    ) = load_rna_files_for_eval(
-        args.data,
-        args.checkpoint[0],
-        args.genes,
-        no_filter = args.nofilter
+    (sc_rna_full_dataset, rna_genes, marker_genes,) = load_rna_files_for_eval(
+        args.data, args.checkpoint[0], args.genes, no_filter=args.nofilter
     )
 
     if hasattr(sc_rna_full_dataset, "size_norm_counts"):
@@ -519,9 +505,7 @@ def main():
 
     # Build the dual combined dataset
     sc_dual_full_dataset = sc_data_loaders.PairedDataset(
-        sc_rna_full_dataset,
-        sc_atac_full_dataset,
-        flat_mode=True,
+        sc_rna_full_dataset, sc_atac_full_dataset, flat_mode=True,
     )
 
     # Write some basic outputs related to variable and obs names
@@ -551,9 +535,7 @@ def main():
 
         prefix = "" if len(args.checkpoint) == 1 else f"model_{checkpoint_basename}"
         spliced_net = model_utils.load_model(
-            ckpt,
-            prefix=args.prefix,
-            device=args.device,
+            ckpt, prefix=args.prefix, device=args.device,
         )
 
         do_latent_evaluation(
