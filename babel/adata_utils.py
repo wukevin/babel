@@ -380,7 +380,6 @@ def normalize_count_table(
         x.raw = x.copy()  # Store the original counts as .raw
     # else:
     #     x.raw = x
-
     if size_factors:
         logging.info("Computing size factors")
         n_counts = np.squeeze(
@@ -391,6 +390,8 @@ def normalize_count_table(
         # The normalized values multiplied by the size factors give the original counts
         x.obs["size_factors"] = n_counts / np.median(n_counts)
         x.uns["median_counts"] = np.median(n_counts)
+        logging.info(f"Found median counts of {x.uns['median_counts']}")
+        logging.info(f"Found maximum counts of {np.max(n_counts)}")
     else:
         x.obs["size_factors"] = 1.0
         x.uns["median_counts"] = 1.0

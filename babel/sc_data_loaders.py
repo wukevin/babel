@@ -392,6 +392,7 @@ class SingleCellDataset(Dataset):
 
         if clip > 0:
             assert isinstance(clip, float) and 0.0 < clip < 50.0
+            logging.info(f"Clipping to {clip} percentile")
             clip_low, clip_high = np.percentile(
                 self.data_raw.X.flatten(), [clip, 100.0 - clip]
             )
