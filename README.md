@@ -92,6 +92,14 @@ import anndata as ad
 x = ad.read_h5ad()
 ```
 
+#### Converting to `h5ad` files
+These `h5ad` files are convenient as they are self-contained datasets with metadata, and can thus be concisely given to BABEL as input (BABEL cannot handle giving, for example, 3 files that specify a datasets's counts, cell metadata, and gene metadata). If you have data that is in these separate formats, we provide a script to help convert them into `h5ad` files that are compatible with BABEL.
+
+```bash
+python bin/convert_to_adata.py foobar_genematrix.tsv.gz foobar.h5ad -t --obsinfo foobar_cell_annotations.csv --obscol 1
+```
+This command takes two positional arguments, the first being the counts matrix and the second being the `h5ad` file to write. The `-t` parameters toggles transposing the given input (BABEL expects input of cell x feature). Additional annotations can optionally be given by the `--obsinfo` and the `--varinfo` arguments, which specify files containing cell and feature metadata annotations, respectively. The `--obscol` and `--varcol` arguments specify the columns within the respective metadata files to use as the "names" of the respective files (e.g. cell names, gene/peak names).
+
 ### Additional commandline options
 Both scripts for training and evaluation described above have many more options designed for advanced users, exposing functionality like exposing batch size, learning rate, etc. These options can be accessed by using the `-h` commandline flag; for example: `python bin/train.py -h`.
 
