@@ -271,6 +271,13 @@ def filter_adata_cells_and_genes(
     filter_gene_max_cells=None,
 ) -> None:
     """Filter the count table in place given the parameters based on actual data"""
+    args = locals()
+    filtering_cells = any(
+        [args[arg] is not None for arg in args if arg.startswith("filter_cell")]
+    )
+    filtering_genes = any(
+        [args[arg] is not None for arg in args if arg.startswith("filter_gene")]
+    )
 
     def ensure_count(value, max_value) -> int:
         """Ensure that the value is a count, optionally scaling to be so"""
@@ -285,7 +292,8 @@ def filter_adata_cells_and_genes(
 
     assert isinstance(x, AnnData)
     # Perform filtering on cells
-    logging.info(f"Filtering {x.n_obs} cells")
+    if filtering_cells:
+        logging.info(f"Filtering {x.n_obs} cells")
     if filter_cell_min_counts is not None:
         sc.pp.filter_cells(
             x,
@@ -320,7 +328,8 @@ def filter_adata_cells_and_genes(
         logging.info(f"Remaining cells after max genes: {x.n_obs}")
 
     # Perform filtering on genes
-    logging.info(f"Filtering {x.n_vars} vars")
+    if filtering_genes:
+        logging.info(f"Filtering {x.n_vars} vars")
     if filter_gene_min_counts is not None:
         sc.pp.filter_genes(
             x,
