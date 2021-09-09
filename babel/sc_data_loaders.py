@@ -396,10 +396,13 @@ class SingleCellDataset(Dataset):
             clip_low, clip_high = np.percentile(
                 self.data_raw.X.flatten(), [clip, 100.0 - clip]
             )
-            assert (
-                clip_low < clip_high
-            ), f"Got discordant values for clipping ends: {clip_low} {clip_high}"
-            self.data_raw.X = np.clip(self.data_raw.X, clip_low, clip_high)
+            if clip_low == clip_high == 0:
+                logging.warning("Skipping clipping, as clipping intervals are 0")
+            else:
+                assert (
+                    clip_low < clip_high
+                ), f"Got discordant values for clipping ends: {clip_low} {clip_high}"
+                self.data_raw.X = np.clip(self.data_raw.X, clip_low, clip_high)
 
         # Apply any final transformations
         if self.transforms:
