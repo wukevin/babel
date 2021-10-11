@@ -31,4 +31,5 @@ dependencies:
   - conda-forge::leidenalg=0.7.0
   - anaconda::cached-property=1.5.*
   - bioconda::ucsc-liftover=357
+  - conda-forge::gdown=4.0.*
 

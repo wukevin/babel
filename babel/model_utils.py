@@ -23,6 +23,7 @@ from torch.utils.tensorboard import SummaryWriter
 import skorch
 
 import tqdm
+import gdown
 
 MODELS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models")
 assert os.path.isdir(MODELS_DIR)
@@ -68,6 +69,15 @@ ReconstructionModelPerf = collections.namedtuple(
     "ReconstructionModelPerf", ["mse_loss"]
 )
 
+# Version 1.1 of model
+# Link to actual file: https://drive.google.com/file/d/1uJDbiDrBb5M0d9I5hjj2Ext-N08CXESS/view?usp=sharing
+# Guide to gdown url formatting: https://github.com/wkentaro/gdown/issues/54
+MODEL_FILE_ID = "1uJDbiDrBb5M0d9I5hjj2Ext-N08CXESS"
+MODEL_FILE_BASENAME = "babel_human_v1.1.tar.gz"
+MODEL_URL = f"https://drive.google.com/uc?id={MODEL_FILE_ID}"
+MODEL_MD5SUM = "5e2f68466a1460a36e39a45229b21b1b"
+MODEL_CACHE_DIR = os.path.join(os.path.expanduser("~"), ".cache/babel_atac_rna")
+
 
 def recursive_to_device(t, device="cpu"):
     """Recursively transfer t to the given device"""
@@ -85,7 +95,7 @@ def state_dict_to_cpu(d):
 
 
 def load_model(
-    checkpoint: str,
+    checkpoint: Optional[str] = None,
     input_dim1: int = -1,
     input_dim2: int = -1,
     prefix: str = "net_",
@@ -99,6 +109,21 @@ def load_model(
         device_parsed = utils.get_device(int(device))
     except (TypeError, ValueError):
         device_parsed = "cpu"
+
+    # Download the model if we are not given a path
+    if checkpoint is None:
+        dl_path = gdown.cached_download(
+            MODEL_URL,
+            path=os.path.join(MODEL_CACHE_DIR, MODEL_FILE_BASENAME),
+            md5=MODEL_MD5SUM,
+            postprocess=gdown.extractall,
+            quiet=not verbose,
+        )
+        logging.info(f"Model tarball at: {dl_path}")
+        checkpoint = os.path.join(MODEL_CACHE_DIR, "cv_logsplit_01_model_only")
+        assert os.path.isdir(
+            checkpoint
+        ), f"Failed to find downloaded model in {checkpoint}"
 
     # Infer input dim sizes if they aren't given
     if input_dim1 is None or input_dim1 <= 0:
@@ -225,7 +250,7 @@ def skorch_grid_search(skorch_net, fixed_params: dict, search_params: dict, trai
 
 def main():
     """On the fly debugging"""
-    load_model(sys.argv[1], verbose=True)
+    load_model(verbose=True)
 
 
 if __name__ == "__main__":
