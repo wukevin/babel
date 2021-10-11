@@ -283,8 +283,8 @@ def build_parser():
         type=str,
         nargs="*",
         required=False,
-        default="",
-        help="Checkpoint directory to load model from. If not given, then we use a untrained, intialized model",
+        default=[None],
+        help="Checkpoint directory to load model from. If not given, automatically download and use a human pretrained model",
     )
     parser.add_argument("--prefix", type=str, default="net_", help="Checkpoint prefix")
     parser.add_argument("--data", required=True, nargs="*", help="Data files")
@@ -344,7 +344,7 @@ def build_parser():
 def load_rna_files_for_eval(
     data, checkpoint: str, rna_genes_list_fname: str = "", no_filter: bool = False
 ):
-    """"""
+    """ """
     if not rna_genes_list_fname:
         rna_genes_list_fname = os.path.join(checkpoint, "rna_genes.txt")
     assert os.path.isfile(
@@ -528,22 +528,16 @@ def main():
     with open(os.path.join(args.outdir, "obs_names.txt"), "w") as sink:
         sink.write("\n".join(sc_dual_full_dataset.obs_names))
 
-    # Load the model
-    device_parsed = args.device
-    try:
-        device_parsed = utils.get_device(int(args.device))
-    except TypeError:
-        device_parsed = "cpu"
-
     for i, ckpt in enumerate(args.checkpoint):
         # Dynamically determine the model we are looking at based on name
-        checkpoint_basename = os.path.basename(ckpt)
-        if checkpoint_basename.startswith("naive"):
-            logging.info(f"Inferred model to be naive")
-            model_class = autoencoders.NaiveSplicedAutoEncoder
-        else:
-            logging.info(f"Inferred model to be normal (non-naive)")
-            model_class = autoencoders.AssymSplicedAutoEncoder
+        if ckpt is not None:
+            checkpoint_basename = os.path.basename(ckpt)
+            if checkpoint_basename.startswith("naive"):
+                logging.info(f"Inferred model to be naive")
+                model_class = autoencoders.NaiveSplicedAutoEncoder
+            else:
+                logging.info(f"Inferred model to be normal (non-naive)")
+                model_class = autoencoders.AssymSplicedAutoEncoder
 
         prefix = "" if len(args.checkpoint) == 1 else f"model_{checkpoint_basename}"
         spliced_net = model_utils.load_model(
