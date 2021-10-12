@@ -283,7 +283,9 @@ def build_parser():
         type=str,
         nargs="*",
         required=False,
-        default=[None],
+        default=[
+            os.path.join(model_utils.MODEL_CACHE_DIR, "cv_logsplit_01_model_only")
+        ],
         help="Checkpoint directory to load model from. If not given, automatically download and use a human pretrained model",
     )
     parser.add_argument("--prefix", type=str, default="net_", help="Checkpoint prefix")
@@ -475,6 +477,8 @@ def main():
     fh.setLevel(logging.INFO)
     logger.addHandler(fh)
 
+    # Handle None values in checkpoints
+
     (sc_rna_full_dataset, rna_genes, marker_genes,) = load_rna_files_for_eval(
         args.data, args.checkpoint[0], args.genes, no_filter=args.nofilter
     )
@@ -530,14 +534,13 @@ def main():
 
     for i, ckpt in enumerate(args.checkpoint):
         # Dynamically determine the model we are looking at based on name
-        if ckpt is not None:
-            checkpoint_basename = os.path.basename(ckpt)
-            if checkpoint_basename.startswith("naive"):
-                logging.info(f"Inferred model to be naive")
-                model_class = autoencoders.NaiveSplicedAutoEncoder
-            else:
-                logging.info(f"Inferred model to be normal (non-naive)")
-                model_class = autoencoders.AssymSplicedAutoEncoder
+        checkpoint_basename = os.path.basename(ckpt)
+        if checkpoint_basename.startswith("naive"):
+            logging.info(f"Inferred model to be naive")
+            model_class = autoencoders.NaiveSplicedAutoEncoder
+        else:
+            logging.info(f"Inferred model to be normal (non-naive)")
+            model_class = autoencoders.AssymSplicedAutoEncoder
 
         prefix = "" if len(args.checkpoint) == 1 else f"model_{checkpoint_basename}"
         spliced_net = model_utils.load_model(
