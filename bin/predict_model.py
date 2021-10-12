@@ -193,7 +193,7 @@ def do_evaluation_rna_from_atac(
     # Seurat expects everything to be sparse
     # https://github.com/satijalab/seurat/issues/2228
     sc_atac_rna_full_preds_anndata = sc.AnnData(
-        scipy.sparse.csr_matrix(sc_atac_rna_full_preds),
+        sc_atac_rna_full_preds,
         obs=sc_dual_full_dataset.dataset_y.data_raw.obs.copy(deep=True),
     )
     sc_atac_rna_full_preds_anndata.var_names = gene_names
