@@ -18,7 +18,9 @@ conda env create -f environment.yml
 This will create a new environment named `babel`. This environment needs to be activated via `conda activate babel` before running any of the code in this repository.
 
 ## Pre-trained model
-We provide a pre-trained BABEL model at the following [link](https://office365stanford-my.sharepoint.com/:u:/g/personal/wukevin_stanford_edu/EeiPjchAkxVOrkJp109HKakB6MigU-VcxTLzwr0J8QEqrA?e=VxWF6s) (md5sum `5e2f68466a1460a36e39a45229b21b1b`). To use this model, extract it into a folder and supply the path to `bin/predict_model.py` using the `--checkpoint` parameter (see "Making predictions on new data" section below). This model is trained on a set of peripheral blood mononuclear cells (PBMCs), colon adenocarcinoma COLO-320DM (DM) cells, colorectal adenocarcinoma COLO-320HSR (HSR) cells; as we discuss in the manuscript, BABEL performs best for cells that are related to these training cell types. Metrics such as psuedo-bulk concordance can be a litmus test for whether or not BABEL generalizes to a particular sample.
+We provide a human pre-trained BABEL model at the following [link](https://drive.google.com/file/d/1uJDbiDrBb5M0d9I5hjj2Ext-N08CXESS/view?usp=sharing) (md5sum `5e2f68466a1460a36e39a45229b21b1b`). Running `predict_model.py` (see below) will automatically donwload this pre-trained model (or use a cached copy) and use it to make predictions. You can also manually download this model, extract it, and supply the path to `bin/predict_model.py` using the `--checkpoint` parameter (see "Making predictions on new data" section below).
+
+This provided model is trained on a set of peripheral blood mononuclear cells (PBMCs), colon adenocarcinoma COLO-320DM (DM) cells, colorectal adenocarcinoma COLO-320HSR (HSR) cells; as we discuss in the manuscript, BABEL performs best for cells that are related to these training cell types. Metrics such as psuedo-bulk concordance can be a litmus test for whether or not BABEL generalizes to a particular sample.
 
 ### Reproducing pre-trained model
 To reproduce the pre-trained model, download the relevant training data at the following [link](https://office365stanford-my.sharepoint.com/:u:/g/personal/wukevin_stanford_edu/Edq1Cr6qejpOgzjZGa4bkvwB-LyH5MLbkLD6wGQCL4jvwA?e=T8IO54). There should be 5 h5 files in the tarball. Simply pass these 5 files to the training script:
@@ -73,7 +75,7 @@ python ~/projects/babel/bin/train_model.py --shareseq skin --outdir shareseq_mod
 ```
 
 ### Making predictions on new data
-Once trained, BABEL can be used to generate new predictions using the following example command. This assumes that `mymodel` is the directory containing the trained BABEL model, and will create an output folder `myoutput`.
+Once trained, BABEL can be used to generate new predictions using the following example command. This assumes that `mymodel` is the directory containing the trained BABEL model, and will create an output folder `myoutput`. Alternatively, you can also omit the `--checkpoint` parameter to automatically download and use the pre-trained human BABEL model described above.
 
 ```bash
 python bin/predict_model.py --checkpoint mymodel --data data1.h5 data2.h5 --outdir myoutput
