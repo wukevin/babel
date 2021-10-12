@@ -12,6 +12,7 @@ from typing import List, Tuple, Union, Callable
 import functools
 
 import numpy as np
+from scipy import sparse
 
 import torch
 import torch.nn as nn
@@ -498,7 +499,7 @@ class ChromAutoEncoder(nn.Module):
 
 
 class ZINBChromAutoEncoder(nn.Module):
-    """"""
+    """ """
 
     def __init__(
         self,
@@ -533,7 +534,7 @@ class ZINBChromAutoEncoder(nn.Module):
 
 
 class NBChromAutoEncoder(nn.Module):
-    """"""
+    """ """
 
     def __init__(
         self,
@@ -1466,12 +1467,13 @@ class SplicedAutoEncoderSkorchNet(PairedAutoEncoderSkorchNet):
         ]
         return np.concatenate(retval)
 
-    def translate_2_to_1(self, x) -> np.ndarray:
+    def translate_2_to_1(self, x) -> sparse.csr_matrix:
         retval = [
-            skorch.utils.to_numpy(yp[2][0])
+            sparse.csr_matrix(skorch.utils.to_numpy(yp[2][0]))
             for yp in self.forward_iter(x, training=False)
         ]
-        return np.concatenate(retval)
+        return sparse.vstack(retval)
+        # return np.concatenate(retval)
 
     def translate_2_to_2(self, x) -> np.ndarray:
         retval = [
