@@ -477,8 +477,10 @@ def main():
     fh.setLevel(logging.INFO)
     logger.addHandler(fh)
 
-    # Handle None values in checkpoints
-
+    if args.checkpoint[0] == os.path.join(
+        model_utils.MODEL_CACHE_DIR, "cv_logsplit_01_model_only"
+    ):
+        _ = model_utils.load_model()  # Downloads if not downloaded
     (sc_rna_full_dataset, rna_genes, marker_genes,) = load_rna_files_for_eval(
         args.data, args.checkpoint[0], args.genes, no_filter=args.nofilter
     )
