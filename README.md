@@ -18,7 +18,7 @@ conda env create -f environment.yml
 This will create a new environment named `babel`. This environment needs to be activated via `conda activate babel` before running any of the code in this repository.
 
 ## Pre-trained model
-We provide a human pre-trained BABEL model at the following [link](https://drive.google.com/file/d/1uJDbiDrBb5M0d9I5hjj2Ext-N08CXESS/view?usp=sharing) (md5sum `5e2f68466a1460a36e39a45229b21b1b`). Running `predict_model.py` (see below) will automatically donwload this pre-trained model (or use a cached copy) and use it to make predictions. You can also manually download this model, extract it, and supply the path to `bin/predict_model.py` using the `--checkpoint` parameter (see "Making predictions on new data" section below).
+We provide a human pre-trained BABEL model at the following [link](https://drive.google.com/file/d/1uJDbiDrBb5M0d9I5hjj2Ext-N08CXESS/view?usp=sharing) (md5sum `5e2f68466a1460a36e39a45229b21b1b`). Running `predict_model.py` (see below) will automatically download this pre-trained model (or use a cached download) and use it to make predictions. You can also manually download this model, extract it, and supply the path to `bin/predict_model.py` using the `--checkpoint` parameter (see "Making predictions on new data" section below).
 
 This provided model is trained on a set of peripheral blood mononuclear cells (PBMCs), colon adenocarcinoma COLO-320DM (DM) cells, colorectal adenocarcinoma COLO-320HSR (HSR) cells; as we discuss in the manuscript, BABEL performs best for cells that are related to these training cell types. Metrics such as psuedo-bulk concordance can be a litmus test for whether or not BABEL generalizes to a particular sample.
 
