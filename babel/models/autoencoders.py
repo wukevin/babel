@@ -1453,19 +1453,19 @@ class SplicedAutoEncoderSkorchNet(PairedAutoEncoderSkorchNet):
             encoded2.append(out22[-1])
         return np.concatenate(encoded1, axis=0), np.concatenate(encoded2, axis=0)
 
-    def translate_1_to_1(self, x) -> np.ndarray:
+    def translate_1_to_1(self, x) -> sparse.csr_matrix:
         retval = [
-            skorch.utils.to_numpy(yp[0][0])
+            sparse.csr_matrix(skorch.utils.to_numpy(yp[0][0]))
             for yp in self.forward_iter(x, training=False)
         ]
-        return np.concatenate(retval)
+        return sparse.vstack(retval)
 
-    def translate_1_to_2(self, x) -> np.ndarray:
+    def translate_1_to_2(self, x) -> sparse.csr_matrix:
         retval = [
-            skorch.utils.to_numpy(yp[1][0])
+            sparse.csr_matrix(skorch.utils.to_numpy(yp[1][0]))
             for yp in self.forward_iter(x, training=False)
         ]
-        return np.concatenate(retval)
+        return sparse.vstack(retval)
 
     def translate_2_to_1(self, x) -> sparse.csr_matrix:
         retval = [
@@ -1473,14 +1473,13 @@ class SplicedAutoEncoderSkorchNet(PairedAutoEncoderSkorchNet):
             for yp in self.forward_iter(x, training=False)
         ]
         return sparse.vstack(retval)
-        # return np.concatenate(retval)
 
-    def translate_2_to_2(self, x) -> np.ndarray:
+    def translate_2_to_2(self, x) -> sparse.csr_matrix:
         retval = [
-            skorch.utils.to_numpy(yp[3][0])
+            sparse.csr_matrix(skorch.utils.to_numpy(yp[3][0]))
             for yp in self.forward_iter(x, training=False)
         ]
-        return np.concatenate(retval)
+        return sparse.vstack(retval)
 
     def score(self, true, pred):
         """
