@@ -85,6 +85,11 @@ BABEL will try determine whether the input files contain ATAC or RNA (or both) i
 * Various `*.h5ad` files containing the predictions. These are named with the convention `inputMode_outputMode_adata.h5ad`. For example the file `atac_rna_adata.h5ad` contains the RNA predictions from ATAC input.
 * If given paired data, this script will also generate concordance metrics in `*.pdf` files with a similar naming convention. For example, `atac_rna_log.pdf` will contain a log-scaled scatterplot comparing measured and imputed expression values per gene per cell.
 
+### Quantifying confidence/uncertainty
+[Added January, 2022]
+
+BABEL's embedding can serve as a useful basis for training classifiers detecting low confidence cells. We demonstrate how this can be done using a Gaussian Process classifier in the notebook `jupyter/uncertainty.ipynb`.
+
 ## Misc.
 ### What are `h5ad` files?
 These files contain `AnnData` objects, a Python object/container designed to store single-cell data (https://anndata.readthedocs.io/en/latest/index.html). For those familiar with Python, these can be colloqially described as "Pandas DataFrames on steroids." For those more familiar with R, these are similar to Seurat objects. A brief Python code snippet to load in an AnnData object `mydata.h5ad` is shown below:
