@@ -23,7 +23,7 @@ We provide a human pre-trained BABEL model at the following [link](https://drive
 This provided model is trained on a set of peripheral blood mononuclear cells (PBMCs), colon adenocarcinoma COLO-320DM (DM) cells, colorectal adenocarcinoma COLO-320HSR (HSR) cells; as we discuss in the manuscript, BABEL performs best for cells that are related to these training cell types. Metrics such as psuedo-bulk concordance can be a litmus test for whether or not BABEL generalizes to a particular sample.
 
 ### Reproducing pre-trained model
-To reproduce the pre-trained model, download the relevant training data at the following [link](https://office365stanford-my.sharepoint.com/:u:/g/personal/wukevin_stanford_edu/Edq1Cr6qejpOgzjZGa4bkvwB-LyH5MLbkLD6wGQCL4jvwA?e=T8IO54). There should be 5 h5 files in the tarball. Simply pass these 5 files to the training script:
+To reproduce the pre-trained model, download the relevant training data at the following [link](https://office365stanford-my.sharepoint.com/:u:/g/personal/wukevin_stanford_edu/Edq1Cr6qejpOgzjZGa4bkvwB-LyH5MLbkLD6wGQCL4jvwA?e=T8IO54) (mirrored [here](https://drive.google.com/file/d/1J-4HH5e8rYapq5JtRq7G-foDs6Y9NzyQ/view?usp=share_link); md5sum `a77582959c681694b7e60be7752bf44a`). There should be 5 h5 files in the tarball. Simply pass these 5 files to the training script:
 
 ```bash
 python bin/train.py --data DM_rep4.h5 DM_rep8.h5 HSR_rep7.h5 HSR_rep8.h5 pbmc_granulocyte_sorted_10k_filtered_feature_bc_matrix.h5 --outdir my_model
