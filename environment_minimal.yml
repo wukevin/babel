@@ -4,6 +4,7 @@ channels:
   - anaconda
   - conda-forge
   - bioconda
+  - numba
   - defaults
 dependencies:
   - python=3.7
@@ -15,6 +16,7 @@ dependencies:
   - intervaltree
   - gdown=4.0
   - matplotlib
+  - numba::numba==0.51.2
   - numpy=1.17
   - pytorch=1.3
   - pandas=0.25
